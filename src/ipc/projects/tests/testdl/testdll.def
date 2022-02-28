@@ -1,0 +1,7 @@
+LIBRARY	"testdl"
+
+EXPORTS
+wraptest
+wraptestObj
+wraptestObj2
+wraptestObjQuick

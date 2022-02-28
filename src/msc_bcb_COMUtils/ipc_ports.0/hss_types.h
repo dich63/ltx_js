@@ -1,0 +1,73 @@
+#pragma once 
+
+#define HSS_ENV_PROCESS_PORT_BY_FACTORY      "hssh.__PROCESS_PORT_BY_FACTORY__"
+#define HSS_ENV_PROCESS_PORT_BY_FACTORYW      L"hssh.__PROCESS_PORT_BY_FACTORY__"
+#define REF_ID_DEMAND "__socket_ref_demand__"
+#define HSS_REF_ID_DEMAND REF_ID_DEMAND
+
+#define HS_PROCESS_PORT_BY_FACTORY     ((char*)(777))    
+#define HS_PROCESS_PORT_BY_FACTORY_W     ((wchar_t*)(777))
+
+#define HSD_SAME_PTR     ((void*)(-1))    
+#define HSD_IO_PORT_PTR  ((void*)(0x512))     
+#define HSD_STATE (-1)
+#define HSD_REPLY_STATE (-2)
+#define HSD_SIGNALER 0x100
+#define HSD_USER_DATA 0x800
+#define HSD_SOCKET 31
+#define HSD_URL 0
+#define HSD_HOST 1
+#define HSD_PARAMS 2
+#define HSD_REPLY 3
+#define HSD_REQUEST 4
+#define HSD_ERROR 5
+#define HSD_SOCKET_REF 6
+#define HSD_LOCAL_INFO 7
+#define HSD_REMOTE_INFO 8
+#define HSD_PROTOCOL 9
+#define HSD_REQUEST_HTTP 10
+#define HSD_HTTP_URL_BASE 11
+#define HSD_REQUEST_POS 12
+#define HSD_TRANSMIT_PACKET_ADD 14
+#define HSD_CONN_PORT 15
+#define HSD_UUID 16
+#define HSD_HTTP_FILE 17
+#define HSD_HTTP_VIRTUAL_ROOT 18
+#define HSD_HTTP_VIRTUAL_FILE 19
+#define HSD_PROCESS_MMAP 20
+#define HSD_WS_VERSION 21
+#define HSD_WS_EXTENSION 22
+#define HSD_BODY_LENGTH 23
+#define HSD_PROCESS_INFO 24
+
+#define HSF_GET 0
+#define HSF_SET 1
+#define HSF_DETACH 2
+#define HSF_REPLY 4
+#define HSF_DUP 8
+#define HSF_CLOSED 16
+#define HSF_FAST_CLOSED 32
+#define HSF_SRD 0x1 
+#define HSF_SRD_AUTO (0x2|HSF_SRD)
+#define HSF_SRD_VIRTUAL 0x100
+#define HSF_SRD_CREATE_PATH (0x1<<16)
+#define HSF_REPLY_SRD MAKELONG(HSF_REPLY,HSF_SRD)
+#define HSF_REPLY_SRD_AUTO MAKELONG(HSF_REPLY,HSF_SRD_AUTO)
+
+#define HSF_REPLAY_SRD   HSF_REPLY_SRD
+#define HSF_REPLAY_SRD_AUTO HSF_REPLY_SRD_AUTO
+
+
+#define HTPL_CLEAR 0
+#define HTPL_FILE 1
+#define HTPL_MEMORY 2
+#define HTPL_REGION 4
+#define HTPL_EOF 32
+#define HTPL_POOL 64
+#define HTPL_SYNCHRO 0x200
+#define HTPL_SEND (HTPL_POOL|HTPL_SYNCHRO)
+#define HTPL_BUFFER_AMOUNT 128
+
+
+
+#define HSS_BUF_COUNT 32

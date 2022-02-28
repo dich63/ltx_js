@@ -1,0 +1,1834 @@
+#pragma once
+
+#ifndef __STDC_CONSTANT_MACROS
+#define __STDC_CONSTANT_MACROS
+#endif
+
+#include "stdint.h"
+
+/*
+#include <avcodec.h>
+#include <avformat.h>
+#include <swscale.h>
+#include <io.h>
+*/
+
+#include "lasercalibrate.h"
+
+#include "dib_viewers.h"
+#include <limits>
+
+#include "ffmpeg_dynamic.h"
+#include "fourcc_ffmpeg.h"
+
+//#include "video/ffmpeg_dynamic.h"
+
+#define KB (0x0400)
+#define MB (KB*KB)
+#define FBCOUNT 8
+
+//BYTE* ggg=(BYTE*)malloc(1920*1080*4);
+
+#pragma comment (lib,"Winmm.lib")
+
+//using namespace ffmpeg_bind;
+
+volatile long g_errs=0;
+int g_err_mode=1;
+
+struct error_detector_t
+{
+  int flags;
+  int mode;
+  
+  mutex_cs_t mutex;
+  error_detector_t():flags(0),mode(0){};
+
+ inline int set_flags(int newflags=0xFFFFFFFF)
+ {
+	 if(mode==0) return 0;
+	 locker_t<mutex_cs_t> lock(mutex);
+	 return make_detach(flags,newflags);
+ }
+
+ inline  int get_flags(int mask=-1)
+ {
+	 if(mode==0) return 0;
+	 locker_t<mutex_cs_t> lock(mutex);
+	 return flags&mask;
+ }
+
+inline int set_clear_bits(int maskset=-1,int maskclear=0,int fcs=0x3)
+{
+    if(mode==0) return 0;
+	locker_t<mutex_cs_t> lock(mutex);
+	if(fcs==0) return flags;	
+	if(fcs&1)   flags=(flags|maskset);
+	if(fcs&2)	flags=(flags&(~maskclear));
+	return flags;	
+}
+
+inline int clear_bits_if(bool f,int mask)
+{
+	if(mode==0) return 0;
+	locker_t<mutex_cs_t> lock(mutex);
+	if(f&&((mask&flags)==0))
+		flags=0;
+	return flags;	
+}
+
+
+ inline int set_bits(int mask=-1)
+ {
+	 if(mode==0) return 0;
+	 locker_t<mutex_cs_t> lock(mutex);
+	 return flags=(flags|mask);
+ }
+
+ inline int clear_bits(int mask=-1)
+ {
+	 if(mode==0) return 0;
+	 locker_t<mutex_cs_t> lock(mutex);
+	 return flags=(flags&(~mask));
+ }
+
+
+} g_error_hack;
+
+
+namespace ffmpeg_bind
+{
+
+
+struct ffmpeg_shared_decoder_base
+{
+
+ffmpeg_shared_decoder_base()
+{
+	memset(this,0,sizeof(ffmpeg_shared_decoder_base));
+}
+
+void close_video()
+{
+	if (pVideoCodecCtx)
+	{
+		avcodec_close(make_detach(pVideoCodecCtx));
+		
+		pVideoCodec = NULL;
+		videoStreamIndex = 0;
+	}
+}
+
+void close_audio()
+{    
+	if (pAudioCodecCtx)
+	{
+		avcodec_close(make_detach(pAudioCodecCtx));
+		pAudioCodec      = NULL;
+		audioStreamIndex = 0;
+	}  
+}
+
+void close_convertor_thread(int to=5000)
+{
+   if(habortevent)
+   {
+	 //  SetEvent(habortevent);
+	 //  CloseHandle(make_detach(habortevent));
+   }
+
+    if(hthread) {
+		if(WAIT_OBJECT_0!=WaitForSingleObject(hthread,to))
+		     TerminateThread(hthread,0);
+		CloseHandle(make_detach(hthread));
+	}
+	//if(habortevent){ CloseHandle(make_detach(habortevent));}
+	if(pImgConvertCtx) 
+		sws_freeContext(make_detach(pImgConvertCtx));
+
+}
+void close()
+{
+	 isOpen = false;
+
+ close_convertor_thread();
+ close_video();
+ close_audio();
+ 
+ if (pFormatCtx)
+ {
+	 //av_close_input_stream(pFormatCtx);
+	 Sleep(2000);
+	 av_close_input_file(pFormatCtx);
+	 pFormatCtx = NULL;
+ }
+//url_fopen
+}
+
+
+HANDLE hthread;
+HANDLE habortevent;
+
+
+AVFormatContext* pFormatCtx;  
+AVCodecContext* pVideoCodecCtx; // FFmpeg codec context.
+AVCodec* pVideoCodec; // FFmpeg codec for video.
+AVCodecContext* pAudioCodecCtx;		 // FFmpeg codec context for audio.
+ AVCodec* pAudioCodec;	 // FFmpeg codec for audio.
+ int videoStreamIndex;		 // Video stream number in file.
+ int audioStreamIndex;		 // Audio stream number in file.
+	 
+ bool isOpen; // File is open or not.
+
+double videoFramePerSecond; 		 // Video frame per seconds.
+double videoBaseTime; // FFmpeg timebase for video.
+double audioBaseTime;  // FFmpeg timebase for audio.
+
+ struct SwsContext *pImgConvertCtx; 		 // FFmpeg context convert image.
+ PixelFormat pxl_fmt;
+
+ int width; // Width of image
+ int height; // Height of image
+ int fbcount;
+ int last_fb;
+ int nframes;
+ int nnc;
+ int ninfo;
+ int max_stack,min_stack,delay_stack;
+ int decode_thread_prior;
+ double fps_ev,dfps_ev_p,dfps_ev_m;
+ volatile long stack_top;
+ 
+};
+
+template<int CP=CP_THREAD_ACP> 
+struct ffmpeg_shared_decoder:ffmpeg_shared_decoder_base
+{
+	
+	typedef typename ffmpeg_shared_decoder<CP> self_t;
+	typedef self_t* this_t;
+	typedef BMPMap::frame_info_t  frame_info_t;
+
+
+
+	BMPMap bmpmap;
+	v_buf<wchar_t> dumpfile;
+	asyn_su::thread_queue cons_queue,decode_queue,input_queue;
+	v_buf<char> m_key;
+
+	
+	ffmpeg_shared_decoder(){ fbcount=FBCOUNT;};
+    template <class CH>
+	ffmpeg_shared_decoder(CH* url,PixelFormat _pxl_fmt=PIX_FMT_BGR24)
+	{
+		  fbcount=FBCOUNT;
+          open(url,_pxl_fmt);
+   	}
+
+~ffmpeg_shared_decoder()
+{
+	if(habortevent)
+	{
+		//  SetEvent(habortevent);
+		  CloseHandle(make_detach(habortevent));
+		  //close();
+	}
+}
+//av_free(pVideoYuv);
+	 
+	struct thread_item
+	{
+		this_t pdecoder;
+		AVFrame* frame;
+
+		thread_item(this_t _pdecoder,AVFrame* _frame=0):pdecoder(_pdecoder),frame(_frame){};
+		~thread_item(){ 
+			av_free(frame);
+		}
+	};
+
+
+   template <class T>
+    struct holderT:_non_copyable
+	{
+		T* p;
+		holderT(T* pp):p(pp){};
+		~holderT(){if(p) delete p;};
+inline		operator T*()
+		{
+			return p;
+		}
+inline       T* operator->()
+	   {
+          return p;
+	   }
+inline	   T* detach()
+	   {
+		   return make_detach(p);
+	   }
+	};
+
+struct thread_item_1:thread_item
+{
+	inline   void operator()()
+	{
+		pdecoder->asyn_proc(this);
+	}
+
+};
+struct thread_item_2:thread_item
+{
+   AVPacket packet;
+   bool fok;
+   int64_t numberFrame;
+   int64_t dt;
+   int64_t dt_dn;
+
+
+   thread_item_2(this_t decoder):thread_item(decoder)
+   {
+	   fok=false;
+   }
+
+inline    bool set_packet(AVPacket* ppacket,int64_t _numberFrame)
+   {
+	   fok=av_dup_packet(ppacket)>=0;
+	   packet=*ppacket;
+	   numberFrame=_numberFrame;
+      return fok;
+   };
+
+   ~thread_item_2(){
+	   if(fok) av_free_packet(&packet);
+   }
+inline   void operator()()
+{
+  pdecoder->asyn_proc2(this);
+}
+
+};
+
+
+
+  struct converter_data_t
+  {
+	  converter_data_t():frame(0),pmutex(0){};
+      AVFrame* frame;
+	  frame_info_t* pmap_info;
+	  mutex_ref_t *pmutex;
+	  ~converter_data_t(){  av_free(frame);}
+  };
+
+  frame_info_t* pmap_info;
+  std::vector<converter_data_t> vconverter_data;	
+  BMPMap::CStopwatch cs;
+  double tconv;
+  uint64_t ttic;
+
+template <class CH>
+bool open(const CH* url,PixelFormat _pxl_fmt=PIX_FMT_BGR24)
+{
+ return  _open((char*)char_mutator<CP>(url),_pxl_fmt);
+}
+
+
+template <class CH>
+bool open(const CH* url,const CH* pxl_fmt_name)
+{
+    char_mutator<> cm(pxl_fmt_name,1);
+	char *sfmt=cm;
+
+	while(isspace(*sfmt)) ++sfmt;
+	char *p=sfmt;
+	while((*p)&&(!isspace(*p)))++p;
+	*p=0;
+	strlwr(sfmt);
+
+	
+
+    PixelFormat _pxl_fmt=avcodec_get_pix_fmt(sfmt);
+	//PixelFormat _pxl_fmt=avcodec_get_pix_fmt(strlwr(char_mutator<>(pxl_fmt_name,1)));
+            //_open((char*)char_mutator<CP>(url),_pxl_fmt);
+	return  _open((char*)char_mutator<CP>(url),_pxl_fmt);
+}
+
+
+bool open_video()
+{
+	bool res = false;
+
+	if (pFormatCtx)
+	{
+		videoStreamIndex = -1;
+
+		for (unsigned int i = 0; i < pFormatCtx->nb_streams; i++)
+		{
+			if (pFormatCtx->streams[i]->codec->codec_type == CODEC_TYPE_VIDEO)
+			{
+				videoStreamIndex = i;
+				pVideoCodecCtx = pFormatCtx->streams[i]->codec;
+				pVideoCodec = avcodec_find_decoder(pVideoCodecCtx->codec_id);
+
+				if (pVideoCodec)
+				{
+					res     = !(avcodec_open(pVideoCodecCtx, pVideoCodec) < 0);
+					width   = pVideoCodecCtx->coded_width;
+					height  = pVideoCodecCtx->coded_height;
+				}
+
+				break;
+			}
+		}
+
+		if (!res)
+		{
+			close_video();
+		}
+		else
+		{
+			pImgConvertCtx = sws_getContext(pVideoCodecCtx->width, pVideoCodecCtx->height,
+				pVideoCodecCtx->pix_fmt,
+				pVideoCodecCtx->width, pVideoCodecCtx->height,
+				pxl_fmt,
+				SWS_POINT, NULL, NULL, NULL);
+		}
+	}
+
+	return res;
+}
+
+bool open_audio()
+{
+	bool res = false;
+
+	if (pFormatCtx)
+	{   
+		audioStreamIndex = -1;
+
+		for (unsigned int i = 0; i < pFormatCtx->nb_streams; i++)
+		{
+			if (pFormatCtx->streams[i]->codec->codec_type == CODEC_TYPE_AUDIO)
+			{
+				audioStreamIndex = i;
+				pAudioCodecCtx = pFormatCtx->streams[i]->codec;
+				pAudioCodec = avcodec_find_decoder(pAudioCodecCtx->codec_id);
+				if (pAudioCodec)
+				{
+					res = !(avcodec_open(pAudioCodecCtx, pAudioCodec) < 0);       
+				}
+				break;
+			}
+		}
+
+		if (! res)
+		{
+			close_audio();
+		}
+	}
+
+	return res;
+}
+
+
+bool _open(const char* url,PixelFormat _pxl_fmt)
+{
+	
+     close();
+	 pxl_fmt=_pxl_fmt;
+     if(safe_len(url)==0) 
+		 return false;
+
+	// Register all components
+	av_register_all();
+
+	// Open media file.
+         v_buf<char> t;
+		 //char* purl=t.undecorate(v_buf<char>().undecorate(url,'"','"'),url,'\'','\'');
+		 char* purl=t.undecorate(url,'"','"');
+		 AVFormatParameters avfp;
+
+		 memset(&avfp,0,sizeof(AVFormatParameters));
+		 //
+		 avfp.initial_pause=1;
+		 //avfp.mpeg2ts_raw=1;
+
+		 int bufsize=0*MB;
+   //av_open_input_file(&pFormatCtx,purl, NULL, bufsize,&avfp);
+   //close();
+//
+		 AVInputFormat* iformat =0;
+		 //if(safe_cmpni(purl,"http:",5)==0)		   iformat=av_find_input_format("mjpeg");
+		 
+		 
+
+   //
+//
+		 int errs;
+   if ((errs=av_open_input_file(&pFormatCtx,purl, iformat, bufsize,&avfp)) != 0)
+   //if ((errs=av_open_input_file(&pFormatCtx,purl, NULL,NULL,NULL)) != 0)
+   	{
+		close();
+		return false;
+	}
+
+
+
+     //if(iformat) pFormatCtx->iformat = iformat;
+	// Get format info.
+	//if(0)
+    Sleep(1000);
+    int arp;
+	arp=av_read_play(pFormatCtx);
+	if (av_find_stream_info(pFormatCtx) < 0)
+	{
+		close();
+		return false;
+	}
+      arp=av_read_pause(pFormatCtx);
+	// open video and audio stream.
+	bool hasVideo = open_video();
+	bool hasAudio = open_audio(); 
+
+	if (!hasVideo)
+	{
+		close();
+		return false;
+	}
+
+	isOpen = true;
+
+	// Get file information.
+	if (videoStreamIndex != -1)
+	{
+		videoFramePerSecond = av_q2d(pFormatCtx->streams[videoStreamIndex]->r_frame_rate);
+		// Need for convert time to ffmpeg time.
+		videoBaseTime       = av_q2d(pFormatCtx->streams[videoStreamIndex]->time_base); 
+	}
+
+	if (audioStreamIndex != -1)
+	{
+		audioBaseTime = av_q2d(pFormatCtx->streams[audioStreamIndex]->time_base);
+	}
+
+	return true;
+};
+
+
+
+static void __stdcall  s_thread_proc(HANDLE habortevent)
+{
+	while(WAIT_IO_COMPLETION==WaitForSingleObjectEx(habortevent,INFINITE,TRUE)){};
+}
+
+v_buf<BYTE> test_buf;
+v_buf<DWORD> test_buf_dw;
+
+bool init_converter()
+{
+	if(!isOpen) return false;
+	vconverter_data.resize(fbcount);
+	
+	int width  = pVideoCodecCtx->width;
+	int height = pVideoCodecCtx->height;
+
+      //test_buf.resize(bmpmap.size_bits);
+	  //test_buf_dw.resize(bmpmap.size_bits);
+	
+	for(int n=0;n<fbcount;n++)
+	{
+
+       converter_data_t& cd = vconverter_data[n];
+
+	   int iii=sizeof(frame_info_t);
+
+	    cd.pmap_info=bmpmap.pframe_info(n);
+		if(n==0) pmap_info=cd.pmap_info;
+		cd.pmutex=&bmpmap.vframe_mutexes[n];
+		cd.frame = avcodec_alloc_frame();
+		uint8_t * buffer =(uint8_t *)cd.pmap_info->pbits;
+		if (buffer &&cd.frame)
+		{
+            avpicture_fill((AVPicture*)cd.frame,buffer,pxl_fmt,width,height);
+		}
+		else return false;
+
+	}
+	
+	return fbcount>0;
+}
+
+inline wchar_t* mapname()
+{
+   return bmpmap.mapname;
+}
+
+inline wchar_t* filename()
+{
+	return bmpmap.filename;
+}
+
+inline HANDLE abort_event()
+{
+	return habortevent;
+}
+
+inline HANDLE dup_abort_event()
+{
+	HANDLE h=0,hp=GetCurrentProcess();
+	DuplicateHandle(hp,bmpmap.habortevent,hp,&h,0,0,DUPLICATE_SAME_ACCESS);
+		return h;
+}
+
+
+bool open_mapping(const wchar_t* filename,const wchar_t* mapname,int nbufs=FBCOUNT)
+{
+
+
+     
+  BITMAPINFO bih={{sizeof(BITMAPINFOHEADER),width,height,1,24,BI_RGB}};
+    bmpmap.close();
+   bool f= bmpmap.init(bih,(wchar_t*)mapname,(wchar_t*)filename,nbufs,8*MB*nbufs);
+   if(f)
+   {
+	   habortevent=dup_abort_event();
+	   ResetEvent(habortevent);
+
+//	   vconverter_data.resize(fbcount);
+//	   for(int n=0;n<fbcount;n++)
+//		   vconverter_data[n]=bmpmap.pframe_info(n);
+/*
+	   v_buf<wchar_t> evn;
+      if(bmpmap.mapname_prfx) evn.printf(L"%s_event",bmpmap.mapname_prfx);
+	   habortevent=CreateEventW(0,1,1,evn.get());
+	   if(WaitForSingleObject(habortevent,5000)!=WAIT_OBJECT_0)
+		   return false;
+	      ResetEvent(habortevent);
+*/
+		  DWORD tid;
+	     hthread=CreateThread(0,0,(LPTHREAD_START_ROUTINE)& s_thread_proc,habortevent,0,&tid);
+		 return hthread!=0;
+   }
+   return false;
+ }
+
+bool create_mapping_buffer(int nbufs=-1)
+{
+    
+	nbufs=fbcount=(nbufs<0)?fbcount:nbufs;
+
+	DWORD bpp=24;
+	DWORD bicompression=BI_RGB;
+
+	if(pxl_fmt==PIX_FMT_YUYV422)
+	{
+		bicompression=FOURCC('Y', 'U', 'Y', '2');
+			//fourcc_ffmpeg_t::pix_fmt_to_fourcc(pxl_fmt);
+		bpp=16;
+
+	}
+	 
+  BITMAPINFO bih={{sizeof(BITMAPINFOHEADER),width,height,1,bpp,bicompression}};
+    
+   bool f= bmpmap.reset(bih,nbufs,24*MB*nbufs);
+   if(f)
+   {
+	     //habortevent=dup_abort_event();
+	   ResetEvent(habortevent);
+	   return decode_queue.init(habortevent);
+	   /*
+		  DWORD tid;
+	     hthread=CreateThread(0,0,(LPTHREAD_START_ROUTINE)& s_thread_proc,habortevent,0,&tid);
+		 return hthread!=0;
+		 */
+   }
+   return false;
+
+}
+
+
+HANDLE open_key( const wchar_t* _mapname,const wchar_t* pathname=0)
+{
+	   m_key.cat("").cat(char_mutator<CP_THREAD_ACP>(_mapname));
+	   bmpmap.open_key(_mapname,pathname); 
+       return habortevent=dup_abort_event();
+}
+
+inline mutex_ref_t* get_mutex()
+{
+	mutex_ref_t* pmutex;
+ for(int n=0;n<fbcount;n++)
+ {	
+	last_fb=(++last_fb)%fbcount;
+    pmutex= vconverter_data[last_fb].pmutex;
+    if(pmutex->try_lock()) return pmutex;
+	
+    
+  }
+   
+   pmutex->lock();
+   return pmutex;
+}
+
+inline void info_log(char* buf)
+{
+	
+	//SetConsoleTitleA(buf);
+	_cprintf(buf);
+}
+inline void info_log(int sp)
+{
+	char buf[128];
+	double t=cs.Sec();
+	double fps=cs.fps(t-tconv);
+	tconv=t;
+	if((nframes&0x7F))
+	 fps_ev=(1.-(1./25.))*fps_ev+(1./25.)*fps;
+	else fps_ev=fps;
+	
+	sprintf(buf,"[%d] <fps>=%5.1f fps=%5.2f      \r",++nframes,fps_ev,fps);
+	//sprintf(buf,"[%d] fps=%g\r",++nframes,fps);
+	_cprintf(buf);
+	//info_log(buf);
+	sprintf(buf,"%04d",sp);
+	SetConsoleTitleA(buf);
+}
+
+
+
+inline static double safe_back_abs(double v)
+{
+	return (v>0)? 1./v:std::numeric_limits<double>::infinity();
+}
+
+
+inline void info_log2(int sp,double dtic,int numbytes=0)
+{
+
+	struct _con_t
+	{
+		int sp,numbytes;
+		double dtic;
+		ffmpeg_shared_decoder* pdecoder;
+		char* key;
+		_con_t(ffmpeg_shared_decoder* pd,int _sp,double _dtic,char* pk,int nb):pdecoder(pd),sp(_sp),dtic(_dtic),key(pk),numbytes(nb){}
+
+		void operator()()
+		{
+			char buf[128];
+			//
+			
+			//			double fps=(dtic>0)? 10000000./dtic:0;
+			//double fps=(dtic>0)? 1./dtic:0;
+			int& nframes= pdecoder->nframes;
+			double& ts_ev=pdecoder->fps_ev;
+			double& dts=pdecoder->dfps_ev_p;
+			double fps0=pdecoder->videoFramePerSecond;
+			double ts0=double(1.)/fps0;
+
+
+			  ts_ev=(1.-(1./30.))*ts_ev+(1./30.)*dtic;
+
+			  double fps=1000.*pdecoder->safe_back_abs(dtic);
+			  double fps_ev=1000.*pdecoder->safe_back_abs(ts_ev);
+
+
+             ++nframes;
+			 int& ninfo=pdecoder->ninfo;
+			 ninfo++;
+			 if(!numbytes)
+			 {
+			 int ifps0=(fps0>0)?fps0/8.:1.001;
+			 if(ifps0<1) ifps0=1;
+			 //ifps0=1;
+			 if((ninfo)%ifps0) return;
+			 }
+            
+			 if(0)
+			 {
+			 
+			 sprintf(buf,"[%d] <fps>=%5.2f fps=%5.2f       \r",nframes,fps_ev,fps);
+			//sprintf(buf,"[%d] <fps>=%5.2f D[+](fps)=%5.5f D[-](fps)=%5.5f  fps=%5.2f      \r",++nframes,fps_ev,dfps_ev_p,dfps_ev_m,fps);
+			//sprintf(buf,"[%d] fps=%g\r",++nframes,fps);
+			_cprintf(buf);
+			//info_log(buf);
+			sprintf(buf,"%04d",sp);
+			 }
+			 else
+			 {
+				 sprintf(buf,"%s:[%d] <fps>=%5.2f fps=%5.2f   stack=%d kf=%d",key,nframes,fps_ev,fps,sp,numbytes);
+ 			 }
+			SetConsoleTitleA(buf);
+		};
+	};
+
+
+	 if(cons_queue) cons_queue.asyn_call(new _con_t(this,sp,dtic,m_key.get(),numbytes));
+}
+
+
+
+inline void info_log20(int sp,double dtic)
+{
+
+	struct _con_t
+	{
+		int sp;
+		double dtic;
+		ffmpeg_shared_decoder* pdecoder;
+		_con_t(ffmpeg_shared_decoder* pd,int _sp,double _dtic):pdecoder(pd),sp(_sp),dtic(_dtic){}
+
+		void operator()()
+		{
+			char buf[128];
+			//
+			double fps=(dtic>0)? 1000./double(dtic):0;
+			//			double fps=(dtic>0)? 10000000./dtic:0;
+			//double fps=(dtic>0)? 1./dtic:0;
+			int& nframes= pdecoder->nframes;
+			double& fps_ev=pdecoder->fps_ev;
+			double& dfps_ev_p=pdecoder->dfps_ev_p;
+			double& dfps_ev_m=pdecoder->dfps_ev_m;
+/*
+			if((nframes&0x7F))
+				fps_ev=(1.-(1./15.))*fps_ev+(1./15.)*fps;
+			else fps_ev=fps;
+			*/
+			//dfps_ev=(1.-(1./30.))*dfps_ev+(1./30.)*fabs(fps-fps_ev);
+
+			fps_ev=(1.-(1./30.))*fps_ev+(1./30.)*fps;
+if(0)
+{
+			double df=fps-fps_ev;
+			dfps_ev_p=(1.-(1./30.))*dfps_ev_p+(1./30.)*max(df,0);
+			dfps_ev_m=(1.-(1./30.))*dfps_ev_m+(1./30.)*max(-df,0);
+}
+
+             double fps0=pdecoder->videoFramePerSecond;
+			 double df=fps-fps0;
+
+     		 dfps_ev_p=(1.-(1./30.))*dfps_ev_p+(1./30.)*df;
+			 int& ninfo=pdecoder->ninfo;
+			 int ifps0=(fps0>0)?fps0/4.:1.001;
+			 if(ifps0<1) ifps0=1;
+			 if((ninfo++)%ifps0) return;
+            
+         if(0)
+		 {
+			 sprintf(buf,"%s[%d] <fps>=%5.2f D(fps)=%5.5f  fps=%5.2f       \r",++nframes,fps_ev,dfps_ev_p,fps);
+			//sprintf(buf,"[%d] <fps>=%5.2f D[+](fps)=%5.5f D[-](fps)=%5.5f  fps=%5.2f      \r",++nframes,fps_ev,dfps_ev_p,dfps_ev_m,fps);
+			//sprintf(buf,"[%d] fps=%g\r",++nframes,fps);
+			_cprintf(buf);
+			//info_log(buf);
+			sprintf(buf,"%04d",sp);
+		}
+		 else
+		 {
+            sprintf(buf,"[%d] <fps>=%5.2f D(fps)=%5.5f  fps=%5.2f  stack=%d",++nframes,fps_ev,dfps_ev_p,fps,sp);
+		 }
+
+			SetConsoleTitleA(buf);
+		};
+	};
+
+	 if(cons_queue) cons_queue.asyn_call(new _con_t(this,sp,dtic));
+}
+
+
+void asyn_proc(AVFrame* frame)
+{
+   locker_t<mutex_ref_t> lock(get_mutex(),false);	
+   converter_data_t &cd=vconverter_data[last_fb];
+   //
+   sws_scale(pImgConvertCtx,frame->data,frame->linesize, 0, height, cd.frame->data, cd.frame->linesize);      
+   //memcpy(cd.frame->data
+
+   InterlockedExchange((volatile LONG*)&(pmap_info->last_num),last_fb);
+
+   long sp=InterlockedDecrement(&stack_top);
+//   info_log2(sp,1);
+
+  //fbcount
+	//vframe_info[n]
+   
+}
+
+void asyn_proc2(thread_item_2* ti )
+{
+	AVFrame* frame = avcodec_alloc_frame();
+
+		ti->frame=frame;
+
+		long sp;
+		
+
+		if(delay_stack>0)
+			while((sp=InterlockedExchangeAdd(&stack_top,0))<delay_stack)
+			{
+					if(!wait_completiton(10)) return ;
+			}
+
+		
+
+    //  ++stack_top;
+	  //Sleep(400);
+		int numbytes;
+		int q=-1;
+     //av_log_set_level(-8);
+		 //g_errs=0;
+
+	
+
+	int err=g_error_hack.clear_bits(0xF);
+	int preflag=1;
+		if((err==0)||(ti->packet.flags & PKT_FLAG_KEY))
+		{
+			 preflag=1;
+
+			//g_error_hack.set_flags(0);
+			//err=-1;
+		}
+       else preflag=0;
+		// Clean up and return
+	
+if(preflag)
+{
+	//	if(numbytes=decode_video(ti->packet.data,ti->packet.size,frame ))
+    //
+	if(numbytes=decode_video2(&ti->packet,frame))
+	{
+		q=frame->key_frame;
+
+		//err= g_error_hack.set_bits(~(0xF));
+		 //err=g_error_hack.set_clear_bits(0,~(0xF),(q)?2:0);
+		err=g_error_hack.clear_bits_if(q,0xF);
+		
+
+    if(err==0)  
+	{
+
+
+	locker_t<mutex_ref_t> lock(get_mutex(),false);	
+	converter_data_t &cd=vconverter_data[last_fb];
+	
+
+	 sws_scale(pImgConvertCtx,frame->data,frame->linesize, 0, height, cd.frame->data, cd.frame->linesize);      
+	InterlockedExchange((volatile LONG*)&(pmap_info->last_num),last_fb);
+
+	
+	// for(int cc=0;cc<1;cc++)  
+	if(0)
+	   { 
+		 lock.detach();
+		 BYTE* p=test_buf.get();
+		 BYTE* ps=cd.frame->data[0];
+
+		 DWORD* pdw=test_buf_dw.get();
+
+		 int cb=test_buf.size_b();
+		 int count=test_buf.count();
+		 for(int n=0;n<count;n++)
+		 {
+			  BYTE c=ps[n];
+              p[n]=c;
+			  pdw[n]=c;
+
+		 }
+		 //test_buf.resize(bmpmap.size_bits);
+	    }
+	  
+	}
+	
+
+	}
+	else g_error_hack.set_flags();
+}
+	
+	 sp=InterlockedDecrement(&stack_top);
+
+	 
+	// q=pVideoCodecCtx->bit_rate;
+
+	//int q=frame->quality;
+	   //q=get_bit_rate(pVideoCodecCtx->codec);
+		   ;
+		info_log2(sp,ti->dt,q);
+//	info_log2(sp,ti->dt,numbytes);
+	
+	//
+	//fbcount
+	//vframe_info[n]
+
+}
+
+
+static void __stdcall s_asyn_proc(thread_item* ti)
+{
+	try{
+		holderT<thread_item> h(ti);
+		ti->pdecoder->asyn_proc(ti->frame); 
+	}catch(...)
+	{
+        
+	}
+
+}
+
+static void __stdcall s_asyn_proc2(thread_item_2* ti)
+{
+	try{
+		holderT<thread_item_2> h(ti);
+		ti->pdecoder->asyn_proc2(ti); 
+	}catch(...)
+	{
+       //g_errs=33;
+	}
+
+}
+
+
+
+
+inline bool asyn_call_convert(AVFrame* frame)
+{
+	HRESULT hr;
+	if(!frame) return false;
+     holderT<thread_item> h(new thread_item(this,frame));
+	 bool f=0;
+     f=::QueueUserAPC((PAPCFUNC)&s_asyn_proc,hthread,ULONG_PTR(h.p));
+	 //hr=GetLastError();
+      
+	 if(f) h.detach();
+	 return f;
+}
+
+DWORD wait_completiton(int to=INFINITE)
+{
+   return WaitForSingleObject(habortevent,to);
+}
+
+template <class CH,class CH2>
+bool init_decode(const CH* sharedfilename,const CH2* mapname=0)
+{
+	
+	bool f;
+	f=open_mapping(char_mutator<CP_THREAD_ACP>(mapname),char_mutator<CP_THREAD_ACP>(sharedfilename),fbcount);
+	if(!f) return false;
+   return true;
+}
+
+/*
+int attribute_align_arg avcodec_decode_video2(AVCodecContext *avctx, AVFrame *picture,
+											  int *got_picture_ptr,
+											  AVPacket *avpkt)
+*/
+
+///*
+inline int decode_video2(AVPacket *avpkt, AVFrame * picture)
+{
+	int res = 0;
+
+	if (pVideoCodecCtx)
+	{
+			int got_picture_ptr = 0;
+			if(avcodec_decode_video2(pVideoCodecCtx, picture,&got_picture_ptr,avpkt)>0)
+			{
+				res = got_picture_ptr;
+			}
+			else
+			{
+				res=0;
+			}
+
+		
+	}
+
+	return res;
+}
+//*/
+
+inline int decode_video(const uint8_t* pInBuffer, size_t nInbufferSize, AVFrame * pOutFrame)
+{
+	int res = 0;
+
+	if (pVideoCodecCtx)
+	{
+		if (pInBuffer && pOutFrame)
+		{
+			int videoFrameBytes = 0;
+			if(avcodec_decode_video(pVideoCodecCtx, pOutFrame, &videoFrameBytes, pInBuffer, nInbufferSize)>0)
+			{
+                   res = videoFrameBytes;
+			}
+			else
+			{
+				res=0;
+			}
+			
+		}
+	}
+
+	return res;
+}
+
+
+AVFrame * decode_next_frame()
+{
+	AVFrame * res = NULL;
+	if (videoStreamIndex != -1)
+	{
+		AVFrame *pVideoYuv = avcodec_alloc_frame();
+		AVPacket packet;
+
+		if (isOpen)
+		{
+			// Read packet.
+			while (av_read_frame(pFormatCtx, &packet) >= 0)
+			{
+				int64_t pts = 0;
+				pts = (packet.dts != AV_NOPTS_VALUE) ? packet.dts : 0;
+
+				if(packet.stream_index == videoStreamIndex)
+				{
+					// Convert ffmpeg frame timestamp to real frame number.
+					/*
+					int64_t numberFrame = (double)((int64_t)pts - 
+						pFormatCtx->streams[videoStreamIndex]->start_time) * 
+						videoBaseTime * videoFramePerSecond; 
+						*/
+
+					// Decode frame
+					//
+					bool isDecodeComplite=0;
+						//
+					//
+					nnc=(nnc+1)%4;
+					//			
+					//
+					if(nnc==0)
+					isDecodeComplite= decode_video(packet.data, packet.size, pVideoYuv);
+					//		  if(0)
+					if (isDecodeComplite)
+					{
+						//
+						res = make_detach(pVideoYuv);
+					}
+					break;
+				} 
+				else if (packet.stream_index == audioStreamIndex)
+				{
+					continue;
+       			}
+
+				av_free_packet(&packet);
+			}
+
+			av_free(pVideoYuv);
+		}    
+	}
+
+	return res;
+}
+
+
+
+bool decode_next_frame2(thread_item_2* ti)
+{
+	
+    int64_t numberFrame_old=-1;
+
+	if (videoStreamIndex != -1)
+	{
+		//AVFrame *pVideoYuv = avcodec_alloc_frame();
+		//ti->frame=pVideoYuv;
+
+		AVPacket packet;
+
+		if (isOpen)
+		{
+			// Read packet.
+			while (av_read_frame(pFormatCtx, &packet) >= 0)
+			{
+				int64_t pts = 0;
+				pts = (packet.dts != AV_NOPTS_VALUE) ? packet.dts : 0;
+
+				int64_t numberFrame = (double)((int64_t)pts - 
+					pFormatCtx->streams[videoStreamIndex]->start_time) * 
+					videoBaseTime * videoFramePerSecond; 
+
+				if(packet.stream_index == videoStreamIndex)
+				{
+                    //double dus=packet.duration*videoBaseTime ; 
+					//double fdus=dus* videoFramePerSecond;
+					if(pFormatCtx->streams[videoStreamIndex]->time_base.den>0)
+					{
+					  if(ti->set_packet(&packet,numberFrame))
+					    return true;
+					}
+				    //else{}
+
+					
+				} 
+				else if (packet.stream_index == audioStreamIndex)
+				{
+					continue;
+       			}
+
+				av_free_packet(&packet);
+			}
+
+			//av_free(pVideoYuv);
+		}    
+	}
+
+	return false;
+}
+
+inline int64_t get_sys_time()
+{
+	//
+	/*
+		int64_t ftIdle;
+		int64_t ftUser, ftKernel;
+		bool f=GetSystemTimes((FILETIME*)&ftIdle,(FILETIME*)&ftKernel,(FILETIME*)&ftUser); 
+		//GetSystemTimeAsFileTime((FILETIME*)&ft);
+		if(f) return ftIdle+ftUser+ftKernel;
+		return 0;
+//*/
+  
+	uint64_t r;
+   GetSystemTimeAsFileTime((LPFILETIME)&r);
+   return r;
+   
+}
+
+struct timer_tuner
+{
+	 UINT u;
+	 bool ftpf;
+	 timer_tuner(int i=1):u(UINT(i)),ftpf(0)
+	 {
+		 if(u>0)   ftpf=TIMERR_NOERROR ==timeBeginPeriod(u);
+
+	 }
+	 ~timer_tuner()
+	 {
+		 if(ftpf) timeEndPeriod(u);
+	 }
+};
+struct waitable_timer_t
+{
+	HANDLE h;
+	waitable_timer_t(bool fmanual=0,int64_t nano_sec=0):h(0)
+	{
+	    h=CreateWaitableTimer(0,fmanual,0);
+		if(nano_sec)  set_interval(nano_sec);
+	};
+
+bool set_interval(int64_t nano_sec)
+	{
+	 LARGE_INTEGER ll;	
+     if(nano_sec<0) nano_sec=-nano_sec;
+	 ll.QuadPart=-(nano_sec/100);
+	  return SetWaitableTimer(h,&ll,0,NULL,NULL,false);
+	}
+	~waitable_timer_t()
+	{
+		if(h) CloseHandle(h);
+	}
+	inline HANDLE handle()
+	{
+		return h;
+	}
+};
+
+bool run_decode2(bool fnostreamble=true)
+{
+	bool f=_run_decode2(fnostreamble);
+	close();
+	return f;
+}
+
+bool _run_decode2(bool fnostreamble=true)
+{
+	int n=0;
+
+	if(!isOpen) return false;
+	cs.Start();
+	tconv=cs.Sec();
+	
+	uint64_t ticlast=GetTickCount();
+	ttic=ticlast;
+		//;get_sys_time();
+
+
+	int sp=-1;
+	fps_ev=0;
+	dfps_ev_p=0;
+	dfps_ev_m=0;
+    
+	//
+	FILE *hf=0;
+
+	if(dumpfile)
+	  hf=_wfopen(dumpfile,L"w");
+
+	double to=1000./ videoFramePerSecond;
+	int ito=to;
+	//
+    double ti=0;  
+	int64_t numberframe_old=-8000000;
+	int ncc=0,ncf=0;
+	double stm= pFormatCtx->streams[videoStreamIndex]->start_time;
+	double ptsold=-7777,dtsold=-77777;
+         BMPMap::CStopwatch csl;
+
+   timer_tuner titu(1);
+
+     SetThreadPriority(GetCurrentThread(),decode_thread_prior);
+
+     double tnano=1000000000./ videoFramePerSecond;
+	 waitable_timer_t wtimer(1,tnano);
+	 HANDLE handles[2]={habortevent,wtimer.handle()};
+		 //WaitForSingleObject(habortevent,to);
+	//while(wait_completiton(int(ti)))
+	//while(1)
+	 int n_handles=(fnostreamble)?2:1;
+	 DWORD wt=(fnostreamble)?INFINITE:0;
+
+	 //
+	 int arp=av_read_play(pFormatCtx);
+	 while((WAIT_OBJECT_0)!=WaitForMultipleObjects(n_handles,handles,0,wt))
+	 //while(wait_completiton(int(ti)))
+	{
+		wtimer.set_interval(tnano);
+		 ++ncf;
+         double t;
+
+		if(fnostreamble) t=int(GetTickCount());
+
+	   holderT<thread_item_2> hitem(new thread_item_2(this));
+	   bool f;
+	   hitem->numberFrame=-7;
+	   if(f= decode_next_frame2(hitem))
+	   {
+		   
+
+		   ///*
+		   double dur=double(hitem->packet.duration)*videoBaseTime; 
+		   if(hf)
+		   {
+
+		   
+		   ++ncc;
+		    double pts=double(hitem->packet.pts-stm)*videoBaseTime;
+			double dts=double(hitem->packet.dts-stm)*videoBaseTime;
+            double dur=double(hitem->packet.duration)*videoBaseTime; 
+			
+			if((dtsold>=dts)||(ptsold>=pts))
+			{
+				if((dtsold>=dts)&&(ptsold>=pts)) fprintf(hf,"[%5d][%5d] pts{%g=>%g} dts{%g=>%g}\n",ncc,ncf,ptsold,pts,dtsold,dts);
+				else if(dtsold>=dts) fprintf(hf,"[%5d][%5d]  dts{%g=>%g}\n",ncc,ncf,dtsold,dts);
+				          else  fprintf(hf,"[%5d][%5d]  pts{%g=>%g}\n",ncc,ncf,ptsold,pts);
+				fflush(hf);
+
+			}
+			 dtsold=dts;
+			 ptsold=pts;
+
+		   }
+
+		   //
+		   uint64_t ctic=GetTickCount();
+			   //
+		   sp=InterlockedIncrement(&stack_top);
+           
+           //
+		   hitem->dt=ctic-make_detach(ticlast,ctic);   
+		   ttic=ticlast;
+		   //hitem->dt=csl.Sec(1);
+
+		   //		   f=::QueueUserAPC((PAPCFUNC)&s_asyn_proc2,hthread,ULONG_PTR(hitem.p));
+		   f=decode_queue.asyn_call(hitem.p);
+		   if(f) 
+		   {     		  	   
+			   
+			   hitem.detach();
+		   }
+
+
+		   
+	   }
+	   else g_error_hack.set_flags();
+
+
+         
+		//	   info_log(sp);
+
+	   if((max_stack>0)&&(sp>max_stack))
+	   {
+		   while((sp=InterlockedExchangeAdd(&stack_top,0))>min_stack)
+		   {
+			   if(!wait_completiton(to)) return 1;
+
+		   }
+
+	   }
+
+
+    	if(fnostreamble)
+		{
+			double dti=int(GetTickCount())-t;
+			ti=to-dti;
+			if(ti<0) ti=0;
+		}
+		
+	}
+	
+	return true;
+}
+
+bool run_decode_fast()
+{
+	struct asyn_p_t
+	{
+      this_t pdecoder;
+	  HANDLE hevent;
+	  asyn_p_t(this_t p,HANDLE he):pdecoder(p),hevent(asyn_su::dup_handle(he)){};
+	  ~asyn_p_t(){SetEvent(hevent);CloseHandle(hevent);}
+
+	  inline void operator()()
+	  {
+            pdecoder->_run_decode_fast();
+	  }
+
+	};
+	HANDLE hh[2]={CreateEvent(0,1,0,0),habortevent};
+	input_queue.init(habortevent).asyn_call(new asyn_p_t(this,hh[0]));
+	WaitForMultipleObjects(2,hh,0,INFINITE);
+	CloseHandle(hh[0]);
+	input_queue.terminate();
+	cons_queue.terminate();
+	decode_queue.terminate();
+    close();
+ return 1;
+}
+
+bool _run_decode_fast()
+{
+	int n=0;
+
+	if(!isOpen) return false;
+	
+	uint64_t ticlast=GetTickCount();
+	ttic=ticlast;
+		//;get_sys_time();
+
+
+	int sp=-1;
+	fps_ev=0;
+	dfps_ev_p=0;
+	dfps_ev_m=0;
+    
+	//
+	
+	double to=1000./ videoFramePerSecond;
+	int ito=to;
+	//
+    double ti=0;  
+	int64_t numberframe_old=-8000000;
+	int ncc=0,ncf=0;
+	double stm= pFormatCtx->streams[videoStreamIndex]->start_time;
+	double ptsold=-7777,dtsold=-77777;
+         BMPMap::CStopwatch csl;
+
+   timer_tuner titu(1);
+
+     SetThreadPriority(GetCurrentThread(),decode_thread_prior);
+
+     double tnano=1000000000./ videoFramePerSecond;
+	 
+	 
+	 //
+	 while(1)
+	{
+
+		 ++ncf;
+         double t;
+
+	   holderT<thread_item_2> hitem(new thread_item_2(this));
+	   bool f;
+	   hitem->numberFrame=-7;
+	   if(f= decode_next_frame2(hitem))
+	   {
+		   
+		   uint64_t ctic=GetTickCount();
+	
+		   sp=InterlockedIncrement(&stack_top);
+           
+        
+		   hitem->dt=ctic-make_detach(ticlast,ctic);   
+		   ttic=ticlast;
+		   f=decode_queue.asyn_call(hitem.p);
+		   if(f) 
+		   {     		  	   
+			   hitem.detach();
+		   }
+
+		   if((max_stack>0)&&(sp>max_stack))
+		   {
+			   while((sp=InterlockedExchangeAdd(&stack_top,0))>min_stack)
+			   {
+				   if(!wait_completiton(to)) return 1;
+				   
+			   }
+		   }
+		   
+	   }
+         
+		
+	}
+	
+	return true;
+}
+
+bool run_decode(bool fff=0)
+{
+	int n=0;
+
+	if(!isOpen) return false;
+	cs.Start();
+	tconv=cs.Sec();
+	//while(wait_completiton(0))
+	while(1)
+	{
+		//
+		AVFrame* frame=decode_next_frame();
+    //		
+		asyn_call_convert(frame);
+//    
+		  //		av_free(frame);
+    
+		//holderT<AVFrame>  hframe=decode_next_frame();
+		//if(asyn_call_convert(hframe)) hframe.detach() ;
+		  //		  info_log();
+	}
+	return true;
+}
+
+};
+
+};
+
+using namespace ffmpeg_bind;
+
+template <class ViewerT=DIB_previewer_base,class CameraT=WC_filemap_ext<ViewerT>>
+struct previewer_image
+{
+    
+	double m_fps;
+	ViewerT dib;
+	CameraT camera;
+	HANDLE hevent;
+	std::vector<BYTE> vv;
+	std::pair<BITMAPFILEHEADER*,size_t> h_s;
+	previewer_image(BMPMap & bmpmap,HWND hwin=GetConsoleWindow()):
+     dib(hwin)
+    ,camera(dib)
+	,m_fps(25)
+	{
+		if(!IsWindow(hwin)) return;
+        h_s=camera.open(bmpmap);
+	}
+	;
+
+static void __stdcall s_preview(previewer_image* p)
+{
+	try
+	{
+		p->preview();
+	}
+	catch (...){}
+   
+}
+
+inline  void __stdcall preview()
+	{
+        
+		double ips=1000/m_fps;
+		for(;;)
+		{
+			camera.locked_update();
+			Sleep(ips);
+		}
+	};
+
+bool run(bool fasynchro,double shrink=1,double fps=25)
+{
+   if(!h_s.first) return false;
+   dib.shrink=shrink;
+   m_fps=fps;
+   if(fasynchro)
+       QueueUserWorkItem((LPTHREAD_START_ROUTINE)&s_preview,this,WT_EXECUTELONGFUNCTION);
+   else s_preview(this);
+}
+
+};
+
+
+
+#define  CP_X CP_THREAD_ACP
+
+#define s_m(s) char_mutator<CP_X>(#s)
+#define _m(s) char_mutator<CP_X>(s)
+
+inline DWORD process_prior(const char* p)
+{
+	
+	struct 
+	{
+		char c;
+        DWORD pr;
+
+	} prior[14]=
+	{
+     {'r',REALTIME_PRIORITY_CLASS}
+    ,{'h',HIGH_PRIORITY_CLASS}
+	,{'a',ABOVE_NORMAL_PRIORITY_CLASS}
+	,{'n',NORMAL_PRIORITY_CLASS}
+	,{'b',BELOW_NORMAL_PRIORITY_CLASS}
+	,{'i',IDLE_PRIORITY_CLASS}
+	,{'l',IDLE_PRIORITY_CLASS}
+	,{'R',REALTIME_PRIORITY_CLASS}
+	,{'H',HIGH_PRIORITY_CLASS}
+	,{'A',ABOVE_NORMAL_PRIORITY_CLASS}
+	,{'N',NORMAL_PRIORITY_CLASS}
+	,{'B',BELOW_NORMAL_PRIORITY_CLASS}
+	,{'I',IDLE_PRIORITY_CLASS}
+	,{'L',IDLE_PRIORITY_CLASS}
+
+    };
+
+if((p)&&(*p))
+	for(int n=0;n<14;++n)
+		if(p[0]==prior[n].c)
+			  return prior[n].pr;
+
+	return NORMAL_PRIORITY_CLASS;
+}
+
+HANDLE g_habortevent=0;
+BOOL WINAPI HandlerRoutine( DWORD dwCtrlType )
+{
+	if(g_habortevent)
+	{
+		SetEvent(g_habortevent);
+		_cprintf("terminate...");
+
+		return true;
+	}
+	return false;
+
+};
+
+
+
+
+void log_test(void*p, int level, const char* fmt, va_list vl)
+{
+
+  //_vcprintf("[%d] %s\n",level)
+
+	//InterlockedIncrement(&g_errs);
+	//InterlockedExchange(&g_errs,-1);
+
+	 g_error_hack.set_flags();
+
+
+	if(g_error_hack.mode&2) return;
+	v_buf<char> vfmt;
+	//vfmt.cat("[%d]").cat(fmt);
+    _cprintf("[%d]",level);
+	_vcprintf(fmt,vl);
+}
+
+
+
+
+template <class Args>
+inline int start_decoder(Args& args)
+{
+ int res=0;
+
+//g_err_mode=args[s_m(error.mode)].def<int>(0);
+
+//if(g_err_mode) av_log_set_callback(&log_test);
+
+   //char_mutator<CP_X> libspath=
+
+
+
+
+int cm=args[s_m(console.mode)].def(1);
+  if(cm)
+  {
+	  if(cm&2) AttachConsole(ATTACH_PARENT_PROCESS);
+	  AllocConsole();
+  }
+  
+  
+
+
+	ffmpeg_shared_decoder<CP_X>  decoder;
+
+	HANDLE habortevent =decoder.open_key(_m(args[s_m(key)].c_str()),_m(args[s_m(bmppath)].c_str()));
+
+	if(! habortevent) return 0;
+
+	if(cm) decoder.cons_queue.init();
+
+
+/*
+  struct __hh
+	{
+		HANDLE h;
+		~__hh(){CloseHandle(h);}
+	}_hh00={habortevent};
+
+*/
+	
+   int rsm=args[s_m(restart)].def(0);
+   if(args[s_m(kill)].def(0))
+   {
+	   rsm|=4;
+   }
+
+   bool furl=safe_len(args[s_m(url)]);
+
+   mutex_t mutex(decoder.bmpmap.mutexname,s_m(.sngltn));
+
+   bool fbusy=!mutex.try_lock();
+
+   locker_t<mutex_t> locker;
+
+
+   if(rsm&4)
+   {
+     SetEvent( habortevent); 
+	 return 0;
+   }
+	if(fbusy)
+	{
+       if(furl)
+	   {
+		 if(rsm)   
+		 {
+			 if(rsm&1) 
+				 SetEvent( habortevent); 
+			 
+		 }
+		  else return 0;
+	   }
+	}
+    
+	_cwprintf(L"wait...");
+	if(furl) locker.attach(&mutex,fbusy);
+	  else  mutex.unlock();
+	  
+	  _cwprintf(L"\rstart...\r");
+	  
+	  
+
+
+	
+  
+//	  HIGH_PRIORITY_CLASS 
+
+  
+  
+  //
+  //locker_t<BMPMap> lock(decoder.bmpmap,fbusy);
+
+
+  if(furl)
+  {
+
+	  if(!ffmpeg_bind::initialize(_m(args[s_m(ffmpeg.path)].def( s_m(%shvslib.path%)))))
+		  FatalAppExitW(0,L"ffmpeg librares loading fail!");
+
+	  int errm=args[s_m(error.mode)].def<int>(0);
+	  g_error_hack.mode=errm&0xF;
+	  if(errm)
+	  {
+		  ffmpeg_bind::av_log_set_callback(&log_test);
+	  }
+
+  
+  if(!args[s_m(fmt)])
+	  res=decoder.open(args[s_m(url)].c_str());
+  else res=decoder.open(args[s_m(url)].c_str(),args[s_m(fmt)].c_str());
+
+  if(!res) return 0;
+
+
+    decoder.fbcount=args[s_m(framebuffer.count)].def(FBCOUNT);
+
+   res = decoder.create_mapping_buffer();
+   //while(1){};
+      
+   if(!res) return res;
+
+   //
+   res =  decoder.init_converter();  
+
+   if(!res) return 0;
+
+    decoder.dumpfile.undecorate(_m(args[s_m(dumpfile)]));
+   //decoder.dumpfile.cat(_m(args[s_m(dumpfile)]));
+  }
+
+   if(cm)
+   {
+       double shrink=args[s_m(viewer.shrink)].def<double>(0.0);
+	   double viewer_fps=args[s_m(viewer.fps)].def<double>(25);
+	   HWND hwin=HWND(args[s_m(viewer.hwnd)].def<int>(int(GetConsoleWindow())));
+    if((shrink>0.00001))
+    {
+       previewer_image<>* previewer =new previewer_image<>(decoder.bmpmap);
+	   previewer->dib.fflip=args[s_m(viewer.flip)].def<int>(-1);
+       previewer->run(furl,shrink,viewer_fps);
+    }
+   }
+   bool fnostream=!(args[s_m(stream.live)].def(true));
+
+   //   fnostream=1;
+   
+   bool fp=THREAD_PRIORITY_IDLE;
+   if(args[s_m(prior)].is())
+   {
+	  DWORD ppc=process_prior(_m(args[s_m(prior)]));
+      fp=SetPriorityClass(GetCurrentProcess(),ppc); 
+   }
+
+   decoder.decode_thread_prior=args[s_m(input.thread.prior)].def(0);
+   decoder.max_stack=args[s_m(stack.max)].def(0);
+   decoder.min_stack=args[s_m(stack.min)].def(0);
+   decoder.delay_stack=args[s_m(stack.delay)].def(0);
+   
+
+   if(cm)
+   {
+	   g_habortevent=habortevent;
+	   SetConsoleCtrlHandler(&HandlerRoutine,TRUE);
+   }
+   
+
+ //
+   int hardm=args[s_m(input.thread.hard)].def(0);
+   if(hardm) decoder.run_decode_fast();
+   else   res =  decoder.run_decode2(fnostream);
+//     res =  decoder.run_decode(fnostream);
+  //   FF_LAMBDA_MAX 
+   //   av_log
+  return res;
+
+}

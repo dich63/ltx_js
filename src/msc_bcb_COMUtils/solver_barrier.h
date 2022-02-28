@@ -1,0 +1,533 @@
+#pragma once
+
+#include <windows.h>
+#include <vector>
+#include <exception>
+#include <conio.h>
+#include "disp_all.h"
+#include "ipc.h"
+#include "os_utils.h"
+#include "posix_condvar.h"
+
+
+
+
+DECL_TYPE_SELECTOR_PRFX(TS_MONITOR,monitor_type)
+#define   TS_MONITOR_SELECTOR  TYPE_SELECT_IF(TS_MONITOR,monitor_type)
+
+
+
+
+
+struct empty_monitor
+{
+	empty_monitor(void* pgroup){};
+};
+
+template <class T>
+struct empty_ini_fifni
+{
+	empty_ini_fifni(T* t,void * pbarrier){};
+};
+
+struct ibarrier
+{
+  virtual bool __stdcall do_wait()=0;
+  virtual int  get_threshold()=0;
+  
+};
+
+struct ithread_group
+{
+
+	virtual void begin()=0;
+	virtual void end()=0;
+    virtual std::vector<HANDLE>& thread_handles()=0;
+	virtual int thread_count()=0;
+	//virtual int set_affinity(std::vector<DWORD>& afmask)=0;
+	virtual ~ithread_group(){};
+inline bool for_each()
+{
+  if(!this) return false;
+  begin();
+  //.......
+   end();
+  return true;
+};
+
+    _interlock 	flags;
+};
+
+
+
+
+
+template <class Abort=std::exception>
+struct cbarrier:ibarrier
+{
+	pthread_barrier_t m_b;
+	inline HANDLE abort_event()
+	{
+		return m_b.hEvtAbort;
+	}
+
+	static void s_abort()
+	{
+		throw Abort();
+	}
+	cbarrier(ULONG count=0)
+	{
+		pthread_barrier_init(&m_b,count,&s_abort); 
+	};
+
+	cbarrier&  reset(ULONG count=0)
+	{
+		this->~cbarrier();
+		new(this) cbarrier(count);
+		return *this;
+	}
+
+	void        abort()
+	{
+		SetEvent(abort_event());
+	}
+
+	~cbarrier()
+	{
+		pthread_barrier_destroy(&m_b); 
+	};
+
+	inline  bool operator ()()
+	{
+		return do_wait();
+	}
+	virtual int  get_threshold()
+	{
+		return m_b.lOrgCount;
+	};
+	virtual bool __stdcall do_wait()
+	{
+		return pthread_barrier_wait(&m_b);
+	}
+
+
+};
+
+
+template <int nth,class Abort=std::exception>
+struct cbarrierN:cbarrier<Abort>
+ {
+	 cbarrierN():cbarrier<Abort>(nth){};
+ };
+
+
+
+template <class thread_cache_item>
+ithread_group* create_thread_group(int nthreads,thread_cache_item** pp_tci)
+{
+	typedef  thread_cache_item::initer_finiter_type initer_finiter_type ;
+	typedef  thread_cache_item::abort_exception_type abort_exception_type;
+	typedef  thread_group<thread_cache_item,initer_finiter_type,abort_exception_type> thread_group_type;
+
+	thread_group_type* ptg=new thread_group_type();
+	ptg->init(nthreads,pp_tci);
+	return ptg;
+}
+
+template <class thread_cache_item>
+ithread_group* create_thread_group( std::vector<flipflop_ptr<thread_cache_item> >& vfft)
+{
+	typedef  thread_cache_item::initer_finiter_type initer_finiter_type ;
+	typedef  thread_cache_item::abort_exception_type abort_exception_type;
+	typedef  thread_group<thread_cache_item,initer_finiter_type,abort_exception_type> thread_group_type;
+
+	thread_group_type* ptg=new thread_group_type();
+	int nthreads=vfft.size();
+	ptg->init(nthreads,0);
+	for(int n=0;n<nthreads;n++)
+	{
+		ptg->pitem[n].pholder=vfft[n];
+	}
+	//vfft.clear();
+	ptg->resume_all();
+	ptg->barrier_startup();
+	return ptg;
+	return 0;
+}
+
+
+
+template <class T,class IniterFiniter=empty_ini_fifni<T>,class abort_exception=std::exception>
+struct thread_group:ithread_group
+{
+
+	struct locker
+	{
+		CRITICAL_SECTION* m_pcs;
+		locker(CRITICAL_SECTION* pcs):m_pcs(pcs)
+		{
+			EnterCriticalSection(m_pcs);
+		};
+		~locker()
+		{
+			LeaveCriticalSection(m_pcs);
+		}
+	};
+
+
+
+	typedef  thread_group<T,IniterFiniter,abort_exception>* this_type;
+
+/*
+	template <class Abort=std::exception>
+	struct cbarrier:ibarrier
+	{
+
+		//		void Lock(){EnterCriticalSection(&m_cs);};
+		//		void Unlock(){LeaveCriticalSection(&m_cs);};
+
+
+		CRITICAL_SECTION m_cs_count;
+		CRITICAL_SECTION	m_cs_wait;
+		volatile		ULONG m_count;
+		volatile		ULONG m_threshold;
+		volatile LONG m_modify;
+
+		union
+		{
+			struct {
+				HANDLE hevent;
+				HANDLE hevent_exception;};
+				struct {
+					HANDLE hevents[2];
+				};
+		};
+
+
+		inline HANDLE abort_event()
+		{
+			return hevent_exception;
+		}
+		inline CRITICAL_SECTION* pcs_count(){return &m_cs_count;};
+		inline CRITICAL_SECTION* pcs_wait(){return &m_cs_wait;};
+
+		cbarrier(ULONG count=0):m_count(count),m_threshold(count),m_modify(0)
+		{
+			//InitializeCriticalSectionAndSpinCount(&m_cs_count,4096); 
+			//InitializeCriticalSectionAndSpinCount(&m_cs_wait,4096); 
+			InitializeCriticalSection(&m_cs_count); 
+			InitializeCriticalSection(&m_cs_wait); 
+			hevent=CreateEvent(0,1,0,0);
+			hevent_exception=CreateEvent(0,1,0,0);
+		};
+
+		cbarrier&  reset(ULONG count=0)
+		{
+			this->~cbarrier();
+			//this->cbarrier(count);
+			new(this) cbarrier(count);
+			return *this;
+		}
+
+		void        abort()
+		{
+			SetEvent(hevent_exception);
+		}
+
+		~cbarrier()
+		{
+			CloseHandle(hevent);
+			CloseHandle(hevent_exception);
+			DeleteCriticalSection(&m_cs_wait);
+			DeleteCriticalSection(&m_cs_count);
+		};
+
+		inline  bool operator ()()
+		{
+			return do_wait();
+		}
+        virtual int  get_threshold()
+		{
+			return m_threshold;
+		};
+		virtual bool __stdcall do_wait()
+		{
+			if(m_threshold==0) return false;
+			LONG modify;
+			{
+				//locker lc(pcs_wait());
+			}
+
+
+			{
+
+				locker lc(pcs_count());
+
+				modify=InterlockedExchange(&m_modify,m_modify);
+
+				if(m_count==m_threshold)
+					ResetEvent(hevent);
+
+				if(--m_count==0)
+				{
+					m_count=m_threshold;
+					InterlockedIncrement(&m_modify);
+					SetEvent(hevent);
+					//
+					return true;
+				};
+
+			}
+
+
+			while(modify==InterlockedExchange(&m_modify,m_modify))
+			{
+				if((WAIT_OBJECT_0+1)==WaitForMultipleObjects(2,hevents,0,10))
+			 {
+				 throw Abort();
+			 }
+			}
+
+			return false;
+		};
+
+	};
+	//=======================
+
+*/
+
+	struct HANDLE_holder
+	{
+		HANDLE m_h;
+		HANDLE_holder(HANDLE h=0):m_h(h){};
+		~HANDLE_holder()
+		{
+			if(m_h) ::CloseHandle(m_h);
+		};
+		inline operator HANDLE(){return m_h;}; 
+
+	};
+
+	std::vector<HANDLE> hthreads;
+
+virtual std::vector<HANDLE>& thread_handles()
+	{
+		return   hthreads ;
+	}
+
+	struct thread_item
+	{
+		this_type powner;
+		unsigned tid;
+		flipflop_ptr<T> pholder;
+		thread_item(this_type ptg=0):powner(ptg){};
+
+		inline void asyn_proc()
+		{
+			T* pt=pholder;
+			if(!pt) powner->barrier_begin.abort();
+			powner->barrier_begin();
+			pt->start(powner);
+			powner->barrier_end();
+
+		}
+		static	void __stdcall s_asyn_proc(ULONG_PTR dwp)
+		{
+			((thread_item*)dwp)->asyn_proc();
+		}
+	};
+
+
+	thread_item* pitem;
+	int n_threads;
+	CRITICAL_SECTION m_cs;
+
+
+	inline CRITICAL_SECTION* pcs()
+	{
+		return &m_cs;
+	}
+
+	typedef typename  TS_MONITOR_SELECTOR<IniterFiniter,empty_monitor>::result monitor_type;
+	monitor_type* pmonitor;
+
+
+	thread_group(int nt=0): n_threads(0),pitem(0),pmonitor(0)
+	{
+		InitializeCriticalSection(&m_cs); 
+	};
+
+virtual void* get_pitems()
+{
+	return pitem;
+}
+
+	//static  DWORD __stdcall s_thread_proc(void* ptr)
+	static  unsigned __stdcall s_thread_proc(void* ptr)
+	{
+        thread_item* pti=(thread_item*) ptr;
+        IniterFiniter init_finally(pti->pholder,&(pti->powner->barrier));   
+		return pti->powner->thread_proc();
+
+		//return   ((this_type)(ptr))->thread_proc();
+	}
+
+	virtual int thread_count()
+	{
+         return  n_threads;
+	}
+	void init( int _n_threads, T** pt)
+	{
+		clear();
+		n_threads=_n_threads;
+		pitem=new thread_item[n_threads]; 
+		hthreads.resize(n_threads);
+		barrier.reset(n_threads);
+		barrier_begin.reset(n_threads+1);
+		barrier_end.reset(n_threads+1);
+		barrier_startup.reset(n_threads+1);
+		unsigned initflag=(pt)?0:CREATE_SUSPENDED; 
+		for(int n=0;n<n_threads;n++)
+		{
+			//this_type pt=const_cast<this_type>(this);
+              
+			pitem[n].powner=this;
+			if(pt) pitem[n].pholder=pt[n];
+			HANDLE h=(HANDLE) _beginthreadex(0,0,&s_thread_proc,pitem+n,initflag,&(pitem[n].tid)); 
+			hthreads[n]=h;
+
+		}
+		if (initflag!=CREATE_SUSPENDED) barrier_startup();
+	}
+	
+	void resume_all()
+	{
+         if(!pmonitor) pmonitor=new monitor_type(this);
+           for(int n=0;n<n_threads;n++)
+			   ResumeThread(hthreads[n]);
+	}
+
+	CStopwatch stopwatch;
+	//template <class _EXC=std::exception>
+	inline double start_all()
+	{
+
+		stopwatch.Start();
+          begin();
+		inner_start();  
+		barrier_begin();
+		// ...............................
+		barrier_end();
+		  
+		return stopwatch.Sec();
+	}
+
+
+virtual void begin()
+{
+
+	inner_start();  
+	barrier_begin();
+};
+virtual void end()
+{
+
+   barrier_end();
+};
+
+
+	inline bool inner_start()
+	{
+
+		//thread_item::s_asyn_proc;
+		DWORD f=DWORD(-1);
+		for(int n=0;n<n_threads;n++)
+		{
+			f&=QueueUserAPC(&thread_item::s_asyn_proc,hthreads[n],ULONG_PTR(pitem+n));
+		}
+		return f;
+	}
+
+	void clear()
+	{
+
+		barrier_startup.abort();
+		barrier_begin.abort();
+		barrier_exit();
+        if(pmonitor) 
+		{
+			delete  pmonitor;
+           pmonitor=0;
+		}
+		if(n_threads)
+		{
+			PHANDLE ph=&(hthreads[0]);
+			WaitForMultipleObjects(n_threads,ph,true,INFINITE);
+		}	   
+		hthreads.clear();
+		if(pitem) delete[] pitem;
+		pitem=0;
+
+	};
+
+
+
+	cbarrier<abort_exception> barrier;
+	cbarrier<abort_exception> barrier_begin;
+	cbarrier<abort_exception> barrier_end;
+	cbarrier<abort_exception> barrier_exit;
+	cbarrier<abort_exception> barrier_startup;
+virtual	~thread_group()
+	{
+		clear();
+		DeleteCriticalSection(&m_cs);
+	}
+
+	int thread_proc()
+	{
+		HANDLE hevs[2]={barrier_begin.abort_event(),barrier_end.abort_event()};
+		try
+		{
+
+			
+			barrier_startup();
+			try
+			{
+				//barrier_main();
+				//WaitForMultipleObjectsEx() 
+				DWORD dw;
+				/*
+				for(;;)
+				{
+				//barrier_main();
+				//if (WAIT_OBJECT_0== WaitForSingleObjectEx(barrier_begin.abort_event(),INFINITE,true));
+				if(WAIT_IO_COMPLETION!=WaitForMultipleObjectsEx(2,hevs,0,INFINITE,true))
+				throw abort_exception();
+
+				//SleepEx(INFINITE,true);
+
+
+
+				};
+				*/
+				while(WAIT_IO_COMPLETION==WaitForMultipleObjectsEx(2,hevs,0,INFINITE,true))
+
+					barrier_exit();
+
+			}
+			catch (abort_exception& e)
+			{
+				SetEvent(hevs[1]);  
+				barrier_exit();
+			}
+		}
+		catch(...)
+		{
+         //
+			SetEvent(hevs[1]);  
+         //
+			barrier_exit();
+		};
+		return 0;
+	};
+};

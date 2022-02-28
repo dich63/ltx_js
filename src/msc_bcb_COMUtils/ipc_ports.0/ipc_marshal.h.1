@@ -1,0 +1,111 @@
+//ipc_marshal
+#pragma once
+#include <windows.h>
+
+#pragma pack(push)
+#pragma pack(1)
+
+
+struct region_op_t
+{
+
+
+
+};
+
+#define IPCM_ERROR 0x80000000
+#define IPCM_HANDLE 1
+#define IPCM_SOCKET 2
+#define IPCM_HGLOBAL 4
+#define IPCM_COM 8
+#define IPCM_COMSTUB IPCM_COM|IPCM_HGLOBAL
+
+
+struct ipc_marshal_data_t;
+
+struct ipc_marshal_data_factory_t
+{
+ typedef void (__cdecl *on_delete_t)(ipc_marshal_data_t* pmd); 
+
+virtual	ipc_marshal_data_t* __cdecl allocate( int sizeb,on_delete_t dp)=0;
+virtual	void __cdecl release_marshal_data(ipc_marshal_data_t* pmd)=0;
+
+};
+
+
+struct ipc_marshal_data_t
+{
+	typedef unsigned long long uint64_t;
+	typedef  long long int64_t;
+	typedef unsigned long  uint32_t;
+	typedef unsigned short  uint16_t;
+	typedef long  int32_t;
+	
+//#ifndef uuid_t
+	typedef  GUID	uuid_t;
+//#endif
+
+
+
+
+  struct ipc_region_t
+  {
+	  
+      int32_t attr;
+
+	  uint32_t sizeb; 	  
+	  union{
+          void* ptr_v;
+		  char* ptr;
+		  int64_t state;
+		  wchar_t* wptr;
+		  HGLOBAL* pcomstub;
+		  IUnknown** ppunknown;
+		  HANDLE* phandle;
+		  SOCKET* psocket;
+	  };
+
+   };
+
+  typedef  ipc_region_t   region_t;
+
+
+  struct header_t  {
+    uint64_t sizeb;
+	uuid_t port_uuid;
+	uuid_t conn_uuid;
+	uint32_t sender_pid;
+	uint32_t server_pid;
+
+	union{
+		uint64_t rsrvd0;
+		HANDLE sender_handle;
+	};
+
+	union{
+		uint64_t rsrvd1;
+		HANDLE server_handle;
+	};
+	union{
+		uint64_t rsrvd2;
+		HANDLE server_thread_handle;
+	};
+
+	int32_t reply_state;
+	int32_t regions_attr;
+	int32_t region_count;
+
+  } header;
+   //struct region_list_t{
+   
+   ipc_region_t regions[1];
+  //} region_list;
+
+  
+};
+
+#pragma pack(pop)
+
+
+
+

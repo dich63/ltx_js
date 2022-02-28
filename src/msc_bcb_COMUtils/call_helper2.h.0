@@ -1,0 +1,136 @@
+#ifndef __SMART_CALLERS2__H0
+#define __SMART_CALLERS2__H0
+#include "argsxx.h"
+#include <malloc.h>
+#include <static_constructors_0.h>
+#include <tls_dllex.h>
+#include <autocloser.h>
+#include "ipc.h"
+#include "stdarg.h"
+//struct __tls_{};
+
+//
+//#pragma optimize(push)
+//#pragma optimize( "", off )
+//#pragma auto_inline( off )
+template <class N,class C=char>
+struct shift_first
+{
+
+	typedef  N  ( __cdecl   shift_first::*pppp)( void* a);
+	N volatile* m_pnn;
+	N  m_nn;
+	//pppp volatile if_compiler_BidloSoft;
+	int volatile m_shift;
+	void* m_ptr;
+	
+//	__declspec(noinline)
+	N __stdcall  fun( void* a,void* pr=NULL ,int* pi=NULL)
+	{
+		void*p=0;
+//		
+		//		void*
+		p= &const_cast<shift_first*>(this);
+		//m_ptr=p;
+
+		//va_list argptr;
+		//va_start(argptr,this);
+
+		//
+		m_shift=int(&a)-int(p);
+		
+		//
+		printf(":: &this=%p ; &a=%p shift=%d \n",p,&a,m_shift);
+		return N();
+	}
+
+
+	shift_first(void* p=NULL):m_ptr(p)
+	{
+		//if_compiler_BidloSoft=&shift_first::fun;
+		m_nn=fun(&GetProcAddress);
+		m_pnn=&m_nn;
+	}
+
+	inline operator C*()
+	{
+		return ptr<C>(m_ptr);
+	}
+
+	inline operator int()
+	{
+		return m_shift;
+	}
+	template<class T>
+	T* ptr(void*p)
+	{
+		char * pn=((char*)p)+m_shift;
+		return (T*)((void*)pn);
+	}
+};
+
+
+
+template <class N>
+struct shift_first_helper
+{
+    N  m_nn;
+static	int m_shift;
+//__declspec(noinline)
+N __cdecl  dummy( void* a,void* pr=NULL ,int* pi=NULL)
+	{
+     
+     void*p= &const_cast<shift_first_helper*>(this);
+	 //m_shift=int(&a)-int(p);
+
+	 if(pi) *pi=int(&a)-int(p);
+     return N(); 
+	}
+
+};
+
+template <class N>
+__declspec(selectany) int shift_first_helper<N>::m_shift;
+
+template<class Ret>
+int get_shift()
+{
+   shift_first_helper<Ret>  sfh;
+   volatile void* pp=METHOD_PTR(shift_first_helper<Ret>,dummy).ptr;
+    sfh.dummy(NULL);
+	return sfh.m_shift;
+}
+
+template<class Ret>
+int first_param_shift(void volatile** p=NULL) 
+{
+//
+	 volatile void* pp=METHOD_PTR(shift_first_helper<Ret>,dummy).ptr;
+	static 		int shift=get_shift<Ret>();
+	if(p) *p=pp;
+	return shift;
+}
+
+template<class Ret,class T>
+void* first_param_address(T** pt)
+{
+	 volatile void* pp=METHOD_PTR(shift_first_helper<Ret>,dummy).ptr;
+	char* p=((char*)(void*)pt)+first_param_shift<Ret>();
+	return p;
+}
+
+
+
+/*
+template<class Ret>
+int first_param_shift()
+{   METHOD_PTR(shift_first<Ret>,fun);
+	shift_first<Ret> sf;
+	int kk=sf;
+	return kk;	
+}
+*/
+
+//#pragma optimize(pop)
+
+#endif

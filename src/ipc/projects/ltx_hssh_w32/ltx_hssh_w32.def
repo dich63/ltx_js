@@ -1,0 +1,6 @@
+; ltx_hssh_w32.dll
+
+LIBRARY	"ltx_hssh_w32"
+
+EXPORTS
+startW

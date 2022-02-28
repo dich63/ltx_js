@@ -1,0 +1,167 @@
+#pragma once
+// mbv_mm.h
+#include "marshal_by_value_base.h"
+#include "ipc_ports/ipc_utils.h"
+#include "sm_region.h"
+//#include "sparse_file_map.h"
+#include "singleton_utils.h"
+
+namespace ipc_utils {	
+
+		namespace mbv_mm{
+
+			//
+			// 
+			typedef ULONGLONG uint64_t; 
+
+            struct  __declspec(uuid("{612F4B92-75FE-4976-882D-F5D351CFF5C0}"))  co_mm_context_t{};
+			struct  mm_context_t: marshal_by_value_base::mbv_context_base_t<mm_context_t,co_mm_context_t,false>
+			{
+
+				typedef sm_region::sm_region_base_t region_base_t;
+				typedef sm_region::sm_region_t region_t;
+
+				mm_context_t():hfile(INVALID_HANDLE_VALUE),hmap(INVALID_HANDLE_VALUE),hmutex(INVALID_HANDLE_VALUE),infobuffer(0),region(){
+					hmap=0;
+
+				}
+				~mm_context_t(){
+					CloseHandle(hmutex);
+					CloseHandle(hmap);
+					CloseHandle(hfile);
+					SysFreeString(infobuffer);
+					
+				}
+
+
+				HRESULT marshal_to_process(i_marshal_helper_t* helper,DWORD pid_target,IStream* pStm){
+
+					HRESULT hr;
+					ULONG l;
+					OLE_CHECK_hr(pStm->Write(&region,sizeof(region_base_t),&l));
+					OLE_CHECK_hr(helper->marshal_hko(pStm,hfile));		
+					OLE_CHECK_hr(helper->marshal_hko(pStm,hmap));		
+					OLE_CHECK_hr(helper->marshal_hko(pStm,hmutex));
+					OLE_CHECK_hr(helper->marshal_BSTR(infobuffer,pStm));
+
+
+					return hr;
+				}
+				HRESULT unmarshal(i_marshal_helper_t* helper,IStream* pStm){
+					HRESULT hr;
+					ULONG l;
+					OLE_CHECK_hr(pStm->Read(&region,sizeof(region_base_t),&l));
+					OLE_CHECK_hr(helper->unmarshal_hko(pStm,&hfile));		
+					OLE_CHECK_hr(helper->unmarshal_hko(pStm,&hmap));		
+					OLE_CHECK_hr(helper->unmarshal_hko(pStm,&hmutex));
+					OLE_CHECK_hr(helper->unmarshal_BSTR(pStm,&infobuffer));
+
+					return hr;
+					
+				}
+				HRESULT set_aggregator_helpers(iaggregator_container* container,pcallback_lib_arguments_t plib)
+				{
+					struct mbv_context_t:base_aggregator_t<mbv_context_t,i_mbv_context>
+					{
+						mbv_context_t(void *context):pcontext(context){};
+						virtual HRESULT STDMETHODCALLTYPE GetContext(void** ppcontext){							
+							OLE_CHECK_PTR(ppcontext);
+							*ppcontext=pcontext;
+							return S_OK;
+						}
+
+					    void *pcontext;
+
+					};
+
+					HRESULT hr;
+
+					smart_ptr_t<iaggregator_helper> helper=aggregator_helper_creator_t<mbv_context_t>::New(new	mbv_context_t(this));					
+                    
+					hr=container->SetAggregator(__uuidof(i_mbv_context),helper);
+
+					return hr;
+				}
+				HANDLE hfile;
+				HANDLE hmap;
+				HANDLE hmutex;
+				region_base_t region;
+				BSTR infobuffer;
+
+			};
+
+
+
+
+			struct  __declspec(uuid("{8F321D99-F9BA-45a1-B638-312EC1A22F27}"))  co_mm_buffer_t{};
+			struct  mm_buffer_t: marshal_by_value_base::mbv_context_base_t<mm_buffer_t,co_mm_buffer_t,false>
+			{
+
+				typedef sm_region::sm_region_base_t region_base_t;
+				typedef sm_region::sm_region_t region_t;
+
+				mm_buffer_t(){
+					
+				}
+				~mm_buffer_t(){
+					
+				}
+
+
+				HRESULT marshal_to_process(i_marshal_helper_t* helper,DWORD pid_target,IStream* pStm){
+
+					HRESULT hr;
+					ULONG l;
+
+					//OLE_CHECK_hr(helper->marshal_hko(pStm,hfile));		
+					
+
+					return hr;
+				}
+				HRESULT unmarshal(i_marshal_helper_t* helper,IStream* pStm){
+					HRESULT hr;
+					ULONG l;
+					
+					//OLE_CHECK_hr(helper->unmarshal_hko(pStm,&hfile));		
+					
+					return hr;
+
+				}
+				HRESULT set_aggregator_helpers(iaggregator_container* container,pcallback_lib_arguments_t plib)
+				{
+					struct mbv_context_t:base_aggregator_t<mbv_context_t,i_mbv_context>
+					{
+						mbv_context_t(void *context):pcontext(context){};
+						virtual HRESULT STDMETHODCALLTYPE GetContext(void** ppcontext){							
+							OLE_CHECK_PTR(ppcontext);
+							*ppcontext=pcontext;
+							return S_OK;
+						}
+
+						void *pcontext;
+
+					};
+
+					HRESULT hr;
+
+					smart_ptr_t<iaggregator_helper> helper=aggregator_helper_creator_t<mbv_context_t>::New(new	mbv_context_t(this));					
+
+					hr=container->SetAggregator(__uuidof(i_mbv_context),helper);
+
+					return hr;
+				}
+
+
+				ipc_utils::smart_ptr_t<i_mbv_context> mbv_context;
+				
+
+			};
+
+
+
+
+
+
+		}; //mbv_mm
+	
+};// ipc_utils

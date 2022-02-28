@@ -1,0 +1,445 @@
+<?xml version="1.0"?>
+<package>
+<component id="js">
+
+
+<public>
+
+	<property name="New" dispid="1">
+	<get/>
+    </property>
+
+	<property name="rh">
+	<get/>
+	<put/>
+    </property>
+
+	
+	<method name="js" internalName="js" dispid="0">
+	</method>
+	
+	<method name="jsml" internalName="js_matlab" >
+		<PARAMETER name="s1" />
+	</method>
+	<method name="js1" internalName="js" >
+		<PARAMETER name="s1" />
+	</method>
+	<method name="js2" internalName="js" >
+		<PARAMETER name="s1" />
+		<PARAMETER name="s2" />
+	</method>
+	<method name="js3" internalName="js" >
+		<PARAMETER name="s1" />
+		<PARAMETER name="s2" />
+		<PARAMETER name="s3" />
+	</method>
+	
+	<method name="js8" internalName="js" >
+		<PARAMETER name="s1" />
+		<PARAMETER name="s2" />
+		<PARAMETER name="s3" />
+		<PARAMETER name="s4" />
+	</method>
+
+
+	<method name="vbs">
+	<PARAMETER name="s"/>
+	</method>
+     <method name="jsfile" >
+	<PARAMETER name="fn"/>
+	</method>
+     <method name="cd" >
+	</method>
+
+
+</public>
+
+<implements type="Behavior" id="Behavior"/>
+
+
+<script language="JScript">
+<![CDATA[
+
+
+//	<PARAMETER name="s" />
+var rh=null;
+
+function get_rh()
+{
+  return rh;
+}
+
+function put_rh(v)
+{
+  rh=v;
+}
+
+function get_New()
+{
+  return createComponent("js")
+}
+
+var description = new ScriptorDBG;
+var __VBG_result=null;
+
+
+function string_from_file(fn)
+{
+var FSO = new ActiveXObject("Scripting.FileSystemObject");
+var File = FSO.GetFile(fn);
+var TextStream = File.OpenAsTextStream(1);
+var str= TextStream.ReadAll();
+TextStream.Close();
+return str;
+}
+
+/*
+var r, re;                   //Declare variables.
+   var s = "The rain in Spain falls mainly in the plain.";
+//
+s = "zfalls:\\\\ falls mainly in the plain.";
+   re = /^(falls)/i;            //Create regular expression pattern.
+   arr=re.exec(s)   
+  print(re.test(s));
+   rrr=s.replace(re,"")
+print("rrr=",rrr)
+
+s = "falls: //:\\\\ falls mainly in the plain.";
+   re = /^(falls:\/\/)|(falls:\\\\)|(falls:)/i; 
+   arr=re.exec(s)   
+  print(re.test(s));
+   rrr=s.replace(re,"")
+print("rrr=",rrr)
+
+
+*/
+
+function ScriptorDBG()
+{
+	this.js = js;
+}
+
+
+function Xtrim(stringToTrim) {
+	return stringToTrim.replace(/^\s+|\s+$/g,"");
+}
+function Xltrim(stringToTrim) {
+	return stringToTrim.replace(/^\s+/,"");
+}
+function Xrtrim(stringToTrim) {
+	return stringToTrim.replace(/\s+$/,"");
+}
+
+function Xrequote(s)
+{
+  //s=s.replace(/^\s+|\s+$/g,"");
+ var rx_beg=/(^\")/i
+ var rx_end=/(\"$)/i
+ if( (rx_beg.test(s)==true)&&(rx_end.test(s)==true) )
+ {
+      s=s.replace(rx_beg,"");
+	  s=s.replace(rx_end,"");
+ }
+ return s;
+}
+
+
+
+
+///*
+
+function parse_arg(s000zz,n00zz)
+{
+  var PO=new Object;
+  PO.flag=false;
+  //rexxxx000=/^\[(.*)\]\:/
+  s000zz=Xtrim(s000zz);
+  var arr000=/^\[(.*)\]\:/.exec(s000zz);
+  PO.flag=(arr000!=null);
+  if(PO.flag==true)
+  {
+     
+    PO.prestr=""
+	if(arr000.length>1) 
+	{
+	  //debugger
+	  PO.prearg=arr000[1].split(/[;,]/);
+	  var _i00_;
+	  for(n00=0;n00<PO.prearg.length;n00++)
+	  {
+	    if( (_i00_=PO.prearg[n00].indexOf("="))>=0)
+		     {
+			  PO.prestr+=" "+PO.prearg[n00]+";";
+			  PO.prearg[n00]=PO.prearg[n00].substr(0,_i00_);
+			 }
+	  }
+	  
+	  PO.prestr+=";";
+	  //
+	  n00zz=(n00zz<PO.prearg.length)? n00zz : PO.prearg.length ;
+	  //n00zz=PO.prearg.length;
+	  
+	  for(n00=0;n00<n00zz;n00++)
+	     PO.prestr+=PO.prearg[n00]+"=$"+n00+";";
+  	}
+	n00zz=s000zz.indexOf("]:");
+	if(n00zz>=0) n00zz+=2;
+	PO.str=s000zz.substr(n00zz);
+  }
+  else  PO.str=s000zz;
+  return PO;
+}
+
+//*/
+
+function _js(s00zz,n00zz)
+{
+//var stf=":LL:L:L:L:";
+s00zz=Xtrim(s00zz);
+var  ff00zz=false;
+var rexxxx000 = /^(file:\/\/)|(file:\\\\)|(file:)/i; 
+ if(ff00zz=rexxxx000.test(s00zz)) s00zz=s00zz.replace(rexxxx000,"");   
+ s00zz=Xtrim(s00zz);
+ rexxxx000 = /^(text:\/\/)|(text:\\\\)|(text:)/i; 
+ s00zz=s00zz.replace(rexxxx000,"");   
+ rexxxx000=/\\n/gm;
+ s00zz=s00zz.replace(rexxxx000,"\n");
+ 
+ //
+ var POXXX00=parse_arg(s00zz,n00zz);
+ 
+ if (POXXX00.flag==true)
+ {
+        
+    eval(POXXX00.prestr);
+       s00zz=POXXX00.str;
+ }	   
+ 
+ if(ff00zz) s00zz=string_from_file(s00zz);
+ 
+  return s00zz;
+}
+
+
+function _internal_js($script_text,$$args,$$shift)
+{
+
+
+
+var $$=$$args;
+var $c=$$args.length-$$shift;
+var a_c=$c;
+ //ccc2=arguments.length;
+    for(n=$$shift;n<$$args.length;n++) eval("$"+(n-$$shift)+"="+"$$["+n+"]");
+    for(n=$$shift;n<$$args.length;n++) eval("a_"+(n-$$shift)+"="+"$$["+n+"]");
+	
+//$script_text=Xtrim($script_text);
+var POXXX00=parse_arg($script_text,$c);
+ if (POXXX00.flag==true)     eval(POXXX00.prestr);
+  $script_text=POXXX00.str;
+
+
+
+ var rexxxx000 = /^(vb:\/\/)|(vb:\\\\)|(vb:)/i; 
+ if(true==rexxxx000.test($script_text)) 
+ {
+    $script_text=$script_text.replace(rexxxx000,"");
+ return vb_eval($script_text=_js($script_text,$c))
+ //vbs(s.replace(rexxxx000,""));   
+ } 
+ else
+ {  
+  rexxxx000 = /^(vbg:\/\/)|(vbg:\\\\)|(vbg:)/i; 
+ if(rexxxx000.test($script_text))
+ return vbsg($script_text.replace(rexxxx000,""));   
+ return eval($script_text=_js($script_text,$c));
+ }
+}
+
+function js($script_text)
+{
+   return _internal_js($script_text,arguments,1); 
+}
+
+function js_matlab($script_text,$$mlarray)
+{
+   if (typeof($$mlarray)!="unknown")
+        return _internal_js($script_text,arguments,1);
+	else	
+	{
+	   $$mlarray1= new VBArray($$mlarray);
+	   return _internal_js($script_text,$$mlarray1.toArray(),0);
+	}
+}
+/*
+function js($script_text)
+{
+
+
+
+var $$=arguments;
+var $c=arguments.length-1;
+var a_c=$c;
+ //ccc2=arguments.length;
+    for(n=1;n<arguments.length;n++) eval("$"+(n-1)+"="+"$$["+n+"]");
+    for(n=1;n<arguments.length;n++) eval("a_"+(n-1)+"="+"$$["+n+"]");
+	
+//$script_text=Xtrim($script_text);
+var POXXX00=parse_arg($script_text,$c);
+ if (POXXX00.flag==true)     eval(POXXX00.prestr);
+  $script_text=POXXX00.str;
+
+
+
+
+
+
+
+ var rexxxx000 = /^(vb:\/\/)|(vb:\\\\)|(vb:)/i; 
+ if(true==rexxxx000.test($script_text)) 
+ {
+    $script_text=$script_text.replace(rexxxx000,"");
+ return vb_eval($script_text=_js($script_text,$c))
+ //vbs(s.replace(rexxxx000,""));   
+ } 
+ else
+ {  
+     
+ return eval($script_text=_js($script_text,$c));
+ }
+}
+*/
+
+
+function RETJ(  )
+{
+  if(arguments.length==0)
+     return __VBG_result;
+     
+if(arguments.length==1) 
+     __VBG_result=arguments[0];
+  else 
+  {
+      __VBG_result=new Array();
+      
+      for(__ii00=0;__ii00<arguments.length;__ii00++)
+      __VBG_result.push(arguments[__ii00]);
+      
+  }
+     return __VBG_result;
+}
+
+function RET(  )
+{
+  if(arguments.length==0)
+     return __VBG_result;
+if(arguments.length==1) 
+     __VBG_result=arguments[0];
+else
+{
+//
+   __VBG_result=vb_array(JsArray(arguments));
+}	 
+     return __VBG_result;
+}
+
+function JsArray(a)
+{
+    var $OJsArray=new Object;
+    if(arguments.length==0) $OJsArray.$array=new Array;
+    else $OJsArray.$array=a;
+    $OJsArray.get=function(n) {return this.$array[n];}
+    $OJsArray.len=function(){return this.$array.length;};
+    $OJsArray.put=function(n,v) {return this.$array[n]=v;}
+    return $OJsArray;
+}
+
+
+function vbsg(s)
+{
+//c="re=/\\n/gm;s="""hh\\nddd\\n\\ddd\\nssss""";a=s.replace(re,"""\n""")"
+//debugger;
+__VBG_result=undefined;
+var re=/\\n/gm;
+s=s.replace(re,"\n")
+ vb_eg(_js(s));
+return RET();
+}
+
+
+
+
+function vbs(s00zz)
+{
+//debugger
+//var re=/\\n/gm;
+//s=s.replace(re,"\n")
+
+var $$=arguments;
+var $c=arguments.length-1;
+var a_c=$c;
+ //ccc2=arguments.length;
+    for(n=1;n<arguments.length;n++) eval("$"+(n-1)+"="+"$$["+n+"]");
+    for(n=1;n<arguments.length;n++) eval("a_"+(n-1)+"="+"$$["+n+"]");
+
+  return vb_eval(_js(s00zz,$c));
+}
+
+
+function jsfile(fn)
+{
+var FSO = new ActiveXObject("Scripting.FileSystemObject");
+var File = FSO.GetFile(fn);
+var TextStream = File.OpenAsTextStream(1);
+var str= TextStream.ReadAll();
+TextStream.Close();
+return js(str)
+}
+
+
+function cd()
+{
+return new ActiveXObject("dich.rha");
+}
+
+
+
+
+
+
+]]>
+</script>
+
+<script language="VBScript" >
+
+Function vb_type(o)
+vb_type=vartype(o)
+end Function
+
+Function vb_array(jo)
+DIM vbarr
+nnn=jo.len()-1
+REDIM vbarr(nnn)
+For KKKK = 0 To nnn
+vbarr(KKKK)=jo.get(KKKK)       
+Next
+vb_array=vbarr
+end Function
+
+
+
+Function vb_eg(s)
+
+ExecuteGlobal s
+
+end Function
+
+
+Function vb_eval(s)
+vb_eval=Eval(s)
+end Function
+</script>
+
+</component>
+
+</package>

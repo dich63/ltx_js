@@ -1,0 +1,689 @@
+#pragma once
+
+#include <windows.h>
+#include <objbase.h>
+#include <WinIoCtl.h>
+#include <comutil.h>
+#include <comdef.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <share.h>
+#include <dispcall/flipflop.h>
+#include <os_utils.h>
+#define KB (1024)
+#define MB (1024*1024)
+#define GB ulong64(1024*MB)
+#define TB (ulong64(1024)*GB)
+
+typedef unsigned long long  ulong64;
+typedef unsigned long       ulong32;
+typedef   signed long       long32;
+typedef   signed long long  long64;
+
+
+template <bool fcloseh=false>
+struct AC_Mutex
+{
+	HANDLE m_h;
+	
+	AC_Mutex(HANDLE h):m_h(h)
+	{
+		WaitForSingleObject(m_h,INFINITE);
+	};
+	~AC_Mutex()
+	{
+		ReleaseMutex(m_h);
+		if(fcloseh) CloseHandle(m_h);
+	}
+
+};
+
+
+/*
+Name  : CRC-32
+Poly  : 0x04C11DB7	x^32 + x^26 + x^23 + x^22 + x^16 + x^12 + x^11 
++ x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
+Init  : 0xFFFFFFFF
+Revert: true
+XorOut: 0xFFFFFFFF
+Check : 0xCBF43926 ("123456789")
+MaxLen: 268 435 455 байт (2 147 483 647 бит) - обнаружение
+одинарных, двойных, пакетных и всех нечетных ошибок
+*/
+unsigned long Crc32(unsigned char *buf, unsigned long len)
+{
+	unsigned long crc_table[256];
+	unsigned long crc;
+
+	for (int i = 0; i < 256; i++)
+	{
+		crc = i;
+		for (int j = 0; j < 8; j++)
+			crc = crc & 1 ? (crc >> 1) ^ 0xEDB88320UL : crc >> 1;
+
+		crc_table[i] = crc;
+	};
+
+	crc = 0xFFFFFFFFUL;
+
+	while (len--) 
+		crc = crc_table[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
+
+	return crc ^ 0xFFFFFFFFUL;
+};
+
+inline UUID new_guid()
+{
+	UUID  r;
+	::CoCreateGuid(&r); 
+	return r;
+};
+
+
+inline UUID new_uuid()
+{
+	UUID  r;
+	::UuidCreateSequential(&r); 
+	return r;
+};
+
+#define GLOBAL_SPACE_UUID get_global_space_id()
+
+inline UUID get_global_space_id()
+{
+	UUID  uuid={ 0xfd7e0ba6, 0xc876, 0x4109, { 0x93, 0xb5, 0x9f, 0xa0, 0x89, 0x93, 0x9, 0x1a } };
+	return uuid;
+};
+
+
+
+template <class Ch,int n=2*MAX_PATH>
+struct ch_buf
+{
+	Ch p[n];
+	inline 	operator Ch*()
+	{
+		return p;
+	};
+
+
+};
+typedef ch_buf<char,128> striid;
+typedef ch_buf<wchar_t> wcbuf;
+typedef ch_buf<char> cbuf;
+
+
+template <typename T,int N=1>
+struct blank_ptr:ch_buf<T,N>
+{};
+
+template <typename T>
+struct blank_ptr<T,1>:ch_buf<T,1>
+{
+	blank_ptr(T t=T())
+	{
+		*p=t;
+	};
+};
+
+inline wcbuf get_id_name(UUID& uuid=GLOBAL_SPACE_UUID,wchar_t* prfx=L"host_mutex_")
+{
+	wcbuf r;
+	wsprintfW(r,L"%s%08X%08X%08X%08X",prfx,uuid);
+	return r;
+};
+
+
+
+
+
+struct system_info
+{
+
+inline static ulong32 os_granularity()
+{
+    static ulong32 g=get().dwAllocationGranularity;
+	return g;
+}
+inline static ulong64& address_mask()
+{
+   static  ulong64 s_address_mask=~(ulong64(os_granularity())-1);
+   return s_address_mask;
+}
+
+inline static ulong64 offset_align(ulong64 offset)
+{
+	return address_mask()&offset;
+}
+
+inline static ulong64 size_align(ulong64 size)
+{
+	static ulong64 ff=os_granularity()-1;
+	return address_mask()&(size+ff);
+}
+
+inline static ulong32 page_size()
+{
+   static ulong32 ps=get().dwPageSize;
+   return ps;
+}
+
+protected:
+	
+	inline static SYSTEM_INFO& get()
+	{
+		struct SYSTEM_INFO_c: SYSTEM_INFO
+		{
+			SYSTEM_INFO_c(){GetSystemInfo(this);}
+		} ;
+		static SYSTEM_INFO_c si;
+		return si;
+	}
+
+};
+
+
+inline ulong64 align_offset(ulong64 offset)
+{
+	return system_info::offset_align(offset);
+}
+
+inline ulong64 size_align(ulong64 size)
+{
+	return system_info::size_align(size);
+}
+
+
+
+/*
+inline ulong32 os_granularity()
+{
+	SYSTEM_INFO si;
+	GetSystemInfo(&si);
+	return si.dwAllocationGranularity;
+}
+*/
+
+struct CLastError
+{
+	DWORD err;
+	CLastError():err(0){};
+	CLastError(DWORD _err)
+	{ SetLastError(err=_err);};
+	~CLastError(){SetLastError(err);};
+	inline DWORD set(DWORD e=GetLastError())
+	{
+		return err=e;
+	}
+	template <typename R>
+	inline R& operator()(R const & r) 
+	{
+		set();
+		return (R)r;
+	}
+};
+
+struct pair_mmn
+{
+	wchar_t filename[MAX_PATH*2];
+	wchar_t* mapname;
+	pair_mmn(wchar_t* fn,wchar_t* delim=L"::"):mapname(NULL)
+	{
+		if(fn) wcscpy(filename,fn);
+		else filename[0]=0;
+		//wchar_t*
+		wchar_t* p;
+		if(p=wcsstr(filename,delim))
+		{
+			*p=0;
+			mapname=p+wcslen(delim);
+		}
+
+	};
+	inline operator bool()
+	{
+		return filename[0];
+	}
+/*
+static pair_mmn make_pair(wchar_t* fn,wchar_t* mapn=NULL,wchar_t* delim=L"::")
+{
+   if(!mapn) return 
+}
+*/
+};
+
+inline bool is_sparse(HANDLE hf)
+{
+
+	BY_HANDLE_FILE_INFORMATION bhfi;
+	GetFileInformationByHandle(hf, &bhfi);
+	return bhfi.dwFileAttributes&FILE_ATTRIBUTE_SPARSE_FILE;
+
+}
+inline bool set_sparse(HANDLE hf)
+{
+ 
+ bool f=is_sparse(hf);
+ if(!f)
+  f=DeviceIoControl(hf, FSCTL_SET_SPARSE,NULL, 0, NULL, 0,dummy_ptr<DWORD>(), NULL);
+ return f;
+}
+
+//S_IREAD
+
+
+struct wild_handle
+{
+	void* m_h; 
+
+	wild_handle():m_h(0){};
+
+/*
+	wild_handle(wild_handle const& a)
+	{
+		m_h=a.m_h;
+	};
+*/
+
+template<class A>
+	wild_handle(A  a)
+	{
+		m_h=(void*)(a);
+	};
+	template<class A>
+	operator A()
+	{
+		return (A)m_h;
+	}
+///*
+	template<class A>
+	wild_handle& operator =(A a)
+	{
+		m_h=(void*)(a);
+		return *this;
+	}
+//*/
+};
+
+
+struct wild_handle_state: wild_handle
+{
+  wild_handle_state():state(0){};
+  ulong64    state;
+  /*
+  wild_handle_state(wild_handle_state const& a)
+  {
+	  m_h=a.m_h;
+       exists=a.exists;
+  };
+  */
+
+ template<class A>
+ wild_handle_state(A a,ulong64 fa=0):state(fa)
+ {
+	m_h=(void*)(a);
+ };
+};
+
+
+
+bool close_handle(wild_handle h)
+{
+  return CloseHandle(h);
+}
+
+wild_handle_state create_sparse_file(wchar_t* pstr,int oflag=O_CREAT|O_RDWR,int shflag=SH_DENYNO,int pmode=S_IWRITE,bool fsparse=true)
+ {
+
+	 CLastError lerr(0);	
+	 wild_handle hf,hmap;
+	 pair_mmn mmn(pstr);
+
+DWORD fileaccess,fileshare,filecreate,fileattrib;
+	/*
+	* decode the access flags
+	*/
+switch( oflag & (_O_RDONLY | _O_WRONLY | _O_RDWR) ) {
+case _O_RDONLY:         /* read access */
+	fileaccess = GENERIC_READ;
+	break;
+case _O_WRONLY:  
+
+	if ((oflag & _O_APPEND)
+		&& (oflag & (_O_WTEXT | _O_U16TEXT | _O_U8TEXT)) != 0)
+	{
+		fileaccess = GENERIC_READ | GENERIC_WRITE;
+	}
+	else
+	{
+		fileaccess = GENERIC_WRITE;
+	}
+	break;
+case _O_RDWR:           /* read and write access */
+	fileaccess = GENERIC_READ | GENERIC_WRITE;
+	break;
+default:             
+	
+    fileaccess =0;
+	}
+
+	/*
+	* decode sharing flags
+	*/
+	switch ( shflag ) {
+
+case _SH_DENYRW:        /* exclusive access */
+	fileshare = 0L;
+	break;
+
+case _SH_DENYWR:        /* share read access */
+	fileshare = FILE_SHARE_READ;
+	break;
+
+case _SH_DENYRD:        /* share write access */
+	fileshare = FILE_SHARE_WRITE;
+	break;
+
+case _SH_DENYNO:        /* share read and write access */
+	fileshare = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	break;
+
+case _SH_SECURE:       /* share read access only if read-only */
+	if (fileaccess == GENERIC_READ)
+		fileshare = FILE_SHARE_READ;
+	else
+		fileshare = 0L;
+	break;
+
+default:                /* error, bad shflag */
+	   fileshare = 0L;
+	}
+
+	/*
+	* decode open/create method flags
+	*/
+	switch ( oflag & (_O_CREAT | _O_EXCL | _O_TRUNC) ) {
+case 0:
+case _O_EXCL:                   // ignore EXCL w/o CREAT
+	filecreate = OPEN_EXISTING;
+	break;
+
+case _O_CREAT:
+	filecreate = OPEN_ALWAYS;
+	break;
+
+case _O_CREAT | _O_EXCL:
+case _O_CREAT | _O_TRUNC | _O_EXCL:
+	filecreate = CREATE_NEW;
+	break;
+
+case _O_TRUNC:
+case _O_TRUNC | _O_EXCL:        // ignore EXCL w/o CREAT
+	filecreate = TRUNCATE_EXISTING;
+	break;
+
+case _O_CREAT | _O_TRUNC:
+	filecreate = CREATE_ALWAYS;
+	break;
+
+default:
+	// this can't happen ... all cases are covered
+	filecreate =0;
+	}
+
+	/*
+	* decode file attribute flags if _O_CREAT was specified
+	*/
+	fileattrib = FILE_ATTRIBUTE_NORMAL;     /* default */
+
+	if ( oflag & _O_CREAT ) {
+
+		if ( !((pmode) & _S_IWRITE) )
+			fileattrib = FILE_ATTRIBUTE_READONLY;
+	}
+
+	/*
+	* Set temporary file (delete-on-close) attribute if requested.
+	*/
+	if ( oflag & _O_TEMPORARY ) {
+		fileattrib |= FILE_FLAG_DELETE_ON_CLOSE;
+		fileaccess |= DELETE;
+		fileshare |= FILE_SHARE_DELETE;
+	}
+
+	/*
+	* Set temporary file (delay-flush-to-disk) attribute if requested.
+	*/
+	if ( oflag & _O_SHORT_LIVED )
+		fileattrib |= FILE_ATTRIBUTE_TEMPORARY;
+
+	/*
+	* Set sequential or random access attribute if requested.
+	*/
+	if ( oflag & _O_SEQUENTIAL )
+		fileattrib |= FILE_FLAG_SEQUENTIAL_SCAN;
+	else if ( oflag & _O_RANDOM )
+		fileattrib |= FILE_FLAG_RANDOM_ACCESS;
+
+            fileattrib |=FILE_FLAG_NO_BUFFERING;
+	//DWORD fileaccess,fileshare,filecreate,fileattrib;
+	//bool finh=(oflag & _O_NOINHERIT);
+   SECURITY_ATTRIBUTES sa={sizeof(sa),NULL,BOOL(oflag & _O_NOINHERIT)};  
+//if(INVALID_HANDLE_VALUE==()
+ hf=CreateFileW(mmn.filename,fileaccess,fileshare,&sa,filecreate,fileattrib,0);
+ bool fexists=GetLastError()==ERROR_ALREADY_EXISTS;
+//     return _open_osfhandle(hf,0);
+ if( fsparse &&(!set_sparse(hf)) ) { CloseHandle(hf); hf=-1;};
+ return  wild_handle_state(hf,fexists); 
+}
+
+
+ulong32 set_zero_block(wild_handle hf,ulong64 offset,ulong64 size=64*KB)
+{
+	GetLastError();
+	FILE_ZERO_DATA_INFORMATION fzdi;
+	DWORD dwTemp=0,ff;
+
+	fzdi.FileOffset.QuadPart = offset;
+	fzdi.BeyondFinalZero.QuadPart = offset+size;
+	ff=::DeviceIoControl(hf, FSCTL_SET_ZERO_DATA,
+		&fzdi, sizeof(fzdi), NULL, 0, &dwTemp, NULL);
+	return ff;
+
+}
+
+ulong64 set_sparse_file_size(wild_handle hf,ulong64 space_size)
+{
+	CLastError lerr(0);	
+	bstr_t merr;
+	bool f;
+	if(hf!=INVALID_HANDLE_VALUE)
+{
+   LARGE_INTEGER& ll=*PLARGE_INTEGER(&space_size);
+   LARGE_INTEGER lb;
+   if(!GetFileSizeEx(hf,&lb)) return 0;
+   //lb.QuadPart=0;
+   DWORD mm=(lb.QuadPart)?FILE_BEGIN:FILE_CURRENT;
+   f=SetFilePointerEx(hf,ll,&lb,mm);
+   merr= msg_error();
+   f=SetEndOfFile(hf);
+   lerr.set();
+   if(f) return lb.QuadPart;
+   merr= msg_error();
+
+  HANDLE  hmap=CreateFileMappingW(hf,0,PAGE_READWRITE,ll.HighPart,ll.LowPart,NULL);
+  if(hmap) return CloseHandle(hmap),space_size;
+}
+  return 0;
+}
+
+
+wild_handle_state get_enties(HANDLE hf,FILE_ALLOCATED_RANGE_BUFFER* pranges=NULL,ulong32 entries=0)
+{
+	FILE_ALLOCATED_RANGE_BUFFER queryrange;
+	FILE_ALLOCATED_RANGE_BUFFER ranges[1];
+
+	ranges[0].FileOffset.QuadPart=-1;
+	ranges[0].Length.QuadPart=-1;
+	DWORD nbytes, n, i,dr;
+	BOOL br;
+	
+	queryrange.FileOffset.QuadPart = 0;
+	br=GetFileSizeEx(hf,&queryrange.Length);
+    if(!pranges) 
+	{
+	pranges=ranges;
+    entries=1;
+	}
+	;
+
+	br = ::DeviceIoControl(hf, FSCTL_QUERY_ALLOCATED_RANGES, &queryrange, sizeof(queryrange), pranges,entries*sizeof(ranges), &nbytes, NULL);
+	if (!br) {
+		dr = ::GetLastError();
+		if (dr != ERROR_MORE_DATA) return 0;
+	}
+	return wild_handle_state(nbytes/sizeof(FILE_ALLOCATED_RANGE_BUFFER),dr);
+}
+
+
+
+wild_handle_state create_sparse_file_map_space(wchar_t* pstr,ulong64& space_size=*(blank_ptr<ulong64>()),int mode=O_CREAT|O_RDWR,int share_mode=SH_DENYNO,int pmode=S_IWRITE)
+{
+
+
+	CLastError lerr(0);	
+
+	AC_Mutex<true> gmut=CreateMutexW(0,0,get_id_name());
+	wild_handle hmap;
+	pair_mmn mmn(pstr);
+
+if(!mmn)
+{
+  return hmap=OpenFileMappingW(FILE_MAP_READ|FILE_MAP_WRITE,true,mmn.mapname);
+}
+
+
+    ulong64 null_s=0;
+    DWORD dwa=GENERIC_READ|GENERIC_WRITE,dwsh=FILE_SHARE_WRITE|FILE_SHARE_READ,dwcr=OPEN_ALWAYS,
+		dwatt=FILE_ATTRIBUTE_NORMAL;
+
+
+wild_handle_state hf=create_sparse_file(pstr,mode,share_mode,pmode);
+if(hf==INVALID_HANDLE_VALUE) return 0;
+
+
+/*
+	hf=CreateFileW(mmn.filename,dwa,dwsh,&sa,dwcr,dwatt,0);
+	CloseHandle(hf);
+	int fd= _wsopen(pstr,mode,share_mode,pmode);
+	
+
+	if(fd==-1) return lerr.set(),0;
+   
+	hf=_get_osfhandle(fd);
+*/
+
+    
+	if( set_sparse(hf))
+	{
+
+		LARGE_INTEGER& ll=*PLARGE_INTEGER(&space_size);
+		if(space_size==0)
+		{
+			if(!GetFileSizeEx(hf,&ll)) return close_handle(hf),0;
+		}
+
+		space_size=size_align(space_size);
+		set_sparse_file_size(hf,space_size);
+
+
+
+
+	    SECURITY_ATTRIBUTES sa={sizeof(SECURITY_ATTRIBUTES),NULL,TRUE};  
+
+
+	//
+	//	hmap=CreateFileMappingW(hf,&sa,PAGE_READWRITE,0,0,mmn.mapname);
+		//
+		hmap=CreateFileMappingW(hf,&sa,PAGE_READWRITE,ll.HighPart,ll.LowPart,mmn.mapname);
+    	//hmap=CreateFileMappingW(hf,&sa,PAGE_READWRITE,0,0,mmn.mapname);
+	}
+	lerr.set();
+	bool fexists=lerr.set()==ERROR_ALREADY_EXISTS;
+	close_handle(hf);
+	return wild_handle_state(hmap,fexists);
+}
+
+bool open_session(wild_handle hmap,ulong64& space_size)
+{
+
+
+ return 0;
+}
+
+
+
+
+
+/*
+
+HANDLE create_new_file_space(wchar_t* pstr,ulong64& space_size,bool fcreate_always=true)
+{
+	CLastError lerr;
+	//HANDLE hf,hmap;
+	wild_handle hf,hmap;
+	DWORD cd=(fcreate_always)?CREATE_ALWAYS:CREATE_NEW,dw;
+	//
+	cd=OPEN_ALWAYS;
+	pair_mmn mmn(pstr);
+
+	if(INVALID_HANDLE_VALUE==(hf=CreateFileW(mmn.filename,GENERIC_READ|GENERIC_WRITE
+		,FILE_SHARE_WRITE|FILE_SHARE_READ,NULL,cd,0,0)))
+		return lerr.set(),0;
+
+
+	//if(DeviceIoControl(hf, FSCTL_SET_SPARSE,NULL, 0, NULL, 0, &dw, NULL))
+    if( set_sparse(hf))
+	{
+
+		ULARGE_INTEGER ll;
+		ll.QuadPart=space_size=size_align(space_size);
+		SECURITY_ATTRIBUTES sa={sizeof(SECURITY_ATTRIBUTES),NULL,TRUE};  
+		hmap=CreateFileMappingW(hf,&sa,PAGE_READWRITE,ll.HighPart,ll.LowPart,mmn.mapname);
+
+	}
+
+
+	lerr.set();
+	CloseHandle(hf);
+	return hmap;
+
+}
+
+*/
+
+
+
+struct wild_ptr
+{
+	void*m_p; 
+	wild_ptr(void* p):m_p(p)
+	{ };
+	template<class A>
+	operator A*()
+	{
+		return (A*)m_p;
+	}
+};
+
+wild_ptr map_of_view(HANDLE hm,ulong64 offset,ulong32 size,ulong32 mode=FILE_MAP_READ|FILE_MAP_WRITE)
+{
+	ULARGE_INTEGER ll;
+	ll.QuadPart=align_offset(offset);
+	ulong32 delta=offset-ll.QuadPart;
+	size=size_align(size+delta);
+	char* p=(char*)MapViewOfFile(hm,mode,ll.HighPart,ll.LowPart,size);
+	if(p) 	p+=delta;
+	return p;
+}

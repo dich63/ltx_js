@@ -1,0 +1,30 @@
+							clsid_t clbind=__uuidof(CLSID_marshal_factory_t);
+							bstr_t regstr=L"CLSID\\" +bstr_t(clbind) +bstr_t("\\InprocServer32\\");     
+							if(moniker_parser_t<wchar_t>::_lcheckni(ptail,L":64",3,&ptail))
+								mn=moniker_parser_t<wchar_t>::reg_value_ex<64>(HKEY_CLASSES_ROOT,bstr_t(),regstr,"");
+							else 
+								if(moniker_parser_t<wchar_t>::_lcheckni(ptail,L":32",3,&ptail))
+									mn=moniker_parser_t<wchar_t>::reg_value_ex<32>(HKEY_CLASSES_ROOT,bstr_t(),regstr,"");								
+
+							if(mn.length()==0) 
+								mn=module_t<>::module_name();
+
+
+
+ERROR_EVALUATION_EXPIRATION 
+ERROR_PASSWORD_EXPIRED
+ERROR_ACCOUNT_EXPIRED 
+ERROR_PER_USER_TRUST_QUOTA_EXCEEDED 
+ERROR_CTX_LICENSE_EXPIRED 
+SEC_E_CERT_EXPIRED
+objref:TUVPVwEAAAAAAAAAAAAAAMAAAAAAAABGAAAAAAAAAADfj3gwUgdaHad14HgrUxuXDwwAAKQxAAD3qwXTGyGAT0cAMQAHAEgARAAAAAcAMQA5ADIALgAxADYAOAAuADEAMgA5AC4AMQAAAAcAMQA5ADIALgAxADYAOAAuADEANQAuADEAAAAHADEAOQAyAC4AMQA2ADgALgAxAC4AMQA0ADIAAAAAAAkA//8AAB4A//8AABAA//8AAAoA//8AAA4A//8AABYA//8AAB8A//8AAAAA:
+
+
+if(!external) { printf("Error : ProcessExternalData not Found!");};
+				printf("DUMP ProcessExternalData!");
+
+
+				var len=external.arg.len;
+				printf("source args len=d",len);            
+             if(len) 
+				printf(dump(external.arg[0],1));

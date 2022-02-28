@@ -1,0 +1,333 @@
+#pragma once
+//#include "filters2d_base.h"
+
+#include <vector>
+#include <algorithm>
+
+
+template <int Ver=0>
+struct  filter_base_t
+{
+	enum    
+	{
+		alpha_denom_dig = 12 ,
+		alpha_denom =1<<alpha_denom_dig
+
+	};
+
+
+	typedef unsigned char byte_t;
+	typedef signed short  int16_t;
+	typedef unsigned short uint16_t;
+	typedef unsigned int uint32_t;
+	typedef long long int int64_t;
+
+	struct frgba_t
+	{
+		
+		float r;
+		float g;
+		float b;
+		float a;
+
+	};
+
+
+	
+	typedef byte_t* pbyte_t;
+	int width;
+	int height;
+	int src_byte_width;
+	int dest_byte_width;
+	int nthread;
+	std::vector<HANDLE> mutexes;
+	std::vector<int> b_rows;
+	std::vector<int> e_rows;
+
+
+/*
+	struct mutex_locker_t
+	{
+		LONG count;
+		HANDLE hevent;
+		mutex_locker_t():hevent(CreateEvent(0,false,false,0)),count(0){};
+		inline try_lock
+
+
+	};
+*/
+	struct thread_node_t{
+		filter_base_t *owner;
+		int b_row,e_row;
+		void* psrc;
+		void* pdest;
+		int n;
+		HANDLE hmutex;
+		thread_node_t(int node,filter_base_t* _owner,void* _psrc,void* _pdest)
+			:n(node),owner(_owner),psrc(_psrc),pdest(_pdest)
+		{
+			ReleaseMutex(owner->mutexes[n]);
+		};
+
+
+		void make_frame() {
+
+			HANDLE hm=owner->mutexes[n];
+			int b_row=owner->b_rows[n],e_row=owner->e_rows[n];
+			WaitForSingleObject(hm,INFINITE);
+			owner->make_frame_node((byte_t*)psrc,(byte_t*)pdest,b_row,e_row);
+			ReleaseMutex(hm);
+		};
+		~thread_node_t()
+		{
+
+		}
+
+	};
+
+	inline int get_NumberOfProcessors() 
+	{
+		SYSTEM_INFO si;
+		GetSystemInfo(&si);
+		return si.dwNumberOfProcessors;
+
+	}
+
+
+	virtual void make_frame_node(byte_t* psrc,byte_t* pdest,int b_row,int e_row)=0;
+
+
+	static		long __stdcall s_proc( thread_node_t* p)
+	{
+		p->make_frame();
+		delete p;
+		return 0;
+	}
+
+
+
+	filter_base_t(int _nthread,int _width,int _height,int _src_byte_width=0,int _dest_byte_width=0)
+		:nthread(_nthread),width(_width),height(_height),src_byte_width( _src_byte_width),dest_byte_width(_dest_byte_width)
+	{
+		if(nthread<=0) nthread=get_NumberOfProcessors() ;
+		if(!src_byte_width) src_byte_width=width;
+		if(!dest_byte_width) dest_byte_width=src_byte_width;
+		if(nthread!=1)
+		{
+			mutexes.resize(nthread);
+			for(int k=0;k<nthread;k++)
+				mutexes[k]=CreateMutex(0,0,0);
+
+			b_rows.resize(nthread);
+			e_rows.resize(nthread);
+			int nh=height/nthread;
+			for(int k=0;k<nthread-1;k++)
+			{				
+				b_rows[k]=k*nh;
+				e_rows[k]=(k+1)*nh-1;
+			}
+
+			int hh=height-(nthread-1)*nh;				
+			b_rows[nthread-1]=hh;
+			e_rows[nthread-1]=height-1;
+
+
+
+
+		}
+
+	};
+
+	~filter_base_t(){
+
+		if(nthread!=1)
+			for(int k=0;k<nthread;k++)
+				CloseHandle(mutexes[k]);
+
+
+	}
+
+	virtual bool make_frame(void* psrc,void* pdest)
+	{
+		if (nthread==1) 
+		{
+			make_frame_node((byte_t*)psrc,(byte_t*)pdest,0,height-1);
+			return true;
+		}
+		else
+		{
+			bool f=true;
+			for(int k=0;k<nthread;k++)
+			{				
+				thread_node_t* pt=new thread_node_t(k,this,psrc,pdest);
+				if(!QueueUserWorkItem((LPTHREAD_START_ROUTINE)&s_proc,pt,WT_EXECUTELONGFUNCTION))
+				{ f=false;break;}
+			}
+
+			WaitForMultipleObjects(nthread,&mutexes[0],true,INFINITE);
+			return f;
+
+		}
+
+
+	};
+
+
+};
+
+template <int Ver=0>
+struct  BMP_io_t{
+
+	enum{
+       hsize=sizeof(BITMAPFILEHEADER)+sizeof(BITMAPINFOHEADER)   
+	};
+
+#pragma pack(push)
+#pragma pack(1)
+
+	struct bmp_file_t
+	{
+		BITMAPFILEHEADER bf;
+		BITMAPINFOHEADER bih;
+
+	};
+
+#pragma pack(pop)
+
+	
+
+	typedef unsigned char byte_t;
+	typedef unsigned short uint16_t;
+	typedef byte_t* pbyte_t;
+
+	int byte_width;
+	std::vector<byte_t> vbuf;
+
+	inline static int get_byte_width(int Width,int BPP){ return  ((WORD)((((DWORD)(Width) * (DWORD)(BPP) + 31) >> 5)) << 2) ;}
+    inline static int get_byte_width(BITMAPINFOHEADER* bih)	{ return  get_byte_width(bih->biWidth,bih->biBitCount);}
+
+	
+
+	inline  int get_byte_width()
+	{
+		return get_byte_width(&get_buf<bmp_file_t>()->bih);
+	}
+
+	template <class N>
+	inline N* get_buf(){ return (N*)((vbuf.size())?&vbuf[0]:0);};
+
+	inline	byte_t* get_bits(){
+
+		bmp_file_t* pbm=get_buf<bmp_file_t>();
+		return ((byte_t*)pbm)+pbm->bf.bfOffBits;
+	}
+
+
+   int save(wchar_t* fn)
+   {
+	   bmp_file_t* pbm=get_buf<bmp_file_t>();
+	   return save(fn,pbm);
+
+   }
+
+   BMP_io_t(){};
+
+   BMP_io_t(int width,int height,int bps=24,int byte_width=0,void* ptr=0)
+   {
+	   create( width, height,bps,byte_width,ptr);
+
+   }
+
+   bmp_file_t* create(int width,int height,int bps=24,int byte_width=0,void* ptr=0)
+   {
+
+	   	   BITMAPINFOHEADER bi={sizeof(BITMAPINFOHEADER),width, height,1,bps};
+	   
+
+	   int bw=get_byte_width(&bi);
+	   if(!byte_width) byte_width=bw;
+	   
+	   int sizim=(bw*height);
+	   int sizfile=sizim+hsize;
+       vbuf.resize(sizfile);
+	   bmp_file_t* pbm=get_buf<bmp_file_t>();
+	   
+	   BITMAPFILEHEADER bf={*((WORD*)"BM"),sizfile,0,0,hsize};
+	   /*
+       	   
+	   pbm->bf.bfSize=sizfile;
+	   pbm->bf.bfOffBits=hsize;
+	   */
+	   pbm->bf=bf;
+	   pbm->bih=bi;
+
+	   if(ptr)
+	   {
+
+	    byte_t* pd= ((byte_t*)pbm)+pbm->bf.bfOffBits;
+	    byte_t* ps=(byte_t*)ptr;
+	    int szr=(width*bps)/8;
+	    for(int y=0;y<height;y++)
+	    {
+		   memcpy(pd,ps,szr);
+		   pd+=bw;
+		   ps+=byte_width;
+	    }	   
+	   }
+
+	   return pbm;
+
+   };
+
+
+ static int save(wchar_t* fn,void* ptr,int width,int height,int bps=24,int byte_width=0)
+   {
+	   BMP_io_t b;
+	   return save(fn, b.create(width,height,bps,byte_width,ptr));       
+   }
+
+    
+static    int save(wchar_t* fn,BITMAPFILEHEADER*pbm)
+	{
+		return save(fn,(bmp_file_t*)pbm); 
+	}
+static	int save(wchar_t* fn,bmp_file_t* pbm,byte_t* pbits=0)
+	{
+		FILE* hf=_wfopen(fn,L"wb");
+		if(!hf) return 0;
+		int res=0;
+		
+		
+		 int size=pbm->bf.bfSize; 
+		 if(size==fwrite(pbm,1,size,hf))
+			 res=size;
+		fclose(hf);
+
+		return res;
+				
+	}
+
+
+
+bmp_file_t* load(wchar_t* fn)
+{
+	FILE* hf=_wfopen(fn,L"rb");
+	if(!hf) return 0;
+	vbuf.resize(hsize);
+	bmp_file_t* pbmi=0;
+
+	if(hsize==fread(get_buf<char>(),1,hsize,hf))
+	{
+       pbmi=get_buf<bmp_file_t>();
+	   int size=pbmi->bf.bfSize;
+	   vbuf.resize(size);
+	   int cb=size-hsize;
+	   pbmi=(cb==fread(get_buf<char>()+hsize,1,cb,hf))?get_buf<bmp_file_t>():0;
+	}
+
+	fclose(hf);
+	return pbmi;
+
+}
+
+};

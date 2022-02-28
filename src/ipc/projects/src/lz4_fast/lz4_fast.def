@@ -1,0 +1,9 @@
+; lz4_fast.dll
+
+LIBRARY	"lz4_fast"
+
+EXPORTS
+lz4_compressBound
+lz4_compress
+lz4_decompress
+startW

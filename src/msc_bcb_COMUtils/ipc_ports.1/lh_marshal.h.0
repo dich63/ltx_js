@@ -1,0 +1,540 @@
+#pragma once
+#include "stack_alloc.hpp"
+#include "ipc_marshal.h"
+#include "ipc_utils.h"
+//#include "Ntsecpkg.h"
+
+#define REGION_STACK_COUNT 32
+
+
+struct lh_marshal_t
+{
+	typedef  ipc_marshal_data_t::ipc_region_t region_t;
+	typedef std::vector<region_t> vregions_t;
+	typedef  ipc_marshal_data_t::uuid_t uuid_t;
+	typedef ipc_utils::COMInit_t COMInit_t;
+	typedef   ipc_utils::CHGlobal_t<char> CHGlobal_t;
+	typedef ipc_utils::process_handle_t process_handle_t;
+	
+     typedef    WSAPROTOCOL_INFOW socket_data_t;
+
+	//vregions_t vregions;
+
+	
+
+	struct inner_data_factory_t:ipc_marshal_data_factory_t
+	{
+		
+		on_delete_t dp;
+
+		inner_data_factory_t():dp(0){};
+		ipc_marshal_data_t* __cdecl allocate( int sizeb,on_delete_t _dp)
+		{
+			
+			marshal_buf.resize(sizeb);
+			dp=_dp;
+			return (ipc_marshal_data_t*)marshal_buf.get();
+		};
+	void	__cdecl release_marshal_data(ipc_marshal_data_t* pmd)
+	{
+		if(dp) dp(pmd);
+		marshal_buf.clear();
+
+	};
+	
+		v_buf<char> marshal_buf;
+	};
+
+
+	lh_marshal_t(ipc_marshal_data_factory_t* _factory=0):pmd(0)
+	{
+		pmd_factory=(_factory)?_factory:&inner_factory;
+	};
+
+	~lh_marshal_t(){clear();}
+
+
+
+	class_initializer_T<ipc_utils::WSA_initerfiniter> socket_lib_init_once;
+
+
+
+
+
+	inline	static const  uuid_t& s_port_uuid()
+	{
+		// {9A516FBC-C85B-4d72-8EA7-D7DAD0FF8444}
+		static const uuid_t s =  { 0x9a516fbc, 0xc85b, 0x4d72, { 0x8e, 0xa7, 0xd7, 0xda, 0xd0, 0xff, 0x84, 0x44 } };
+		return s;
+
+	}
+
+
+	template <template<class> class  Allocator=std::allocator >
+	struct marshal_data_impl_t:ipc_marshal_data_t
+	{
+
+		typedef Allocator<char> allocator_t;
+		//
+		// vregions_t vregions;
+
+	};
+
+
+	static	inline int region_marshal_size(region_t& r)
+	{
+		
+		if(r.attr==0) return r.sizeb;
+		if(r.attr&IPCM_SOCKET)
+			return sizeof(socket_data_t);
+		if(r.attr&IPCM_HGLOBAL)
+			return GlobalSize(*r.pcomstub);
+		if(r.attr&IPCM_COM)
+		{
+			HRESULT hr;
+			ULONG ll=0;
+			if(FAILED(CoGetMarshalSizeMax(&ll,__uuidof(IUnknown),*r.ppunknown,MSHCTX_LOCAL,0,MSHLFLAGS_NORMAL)))
+			{
+				SetLastError(hr);
+				return -1;
+			};
+           return ll;
+		}
+
+
+		return sizeof(long long);
+	}
+
+	struct Impersonate_t
+	{
+		HRESULT hr;
+		Impersonate_t(HANDLE hp=GetCurrentThread())
+		{
+
+			//BOOL fpp=ImpersonateAnonymousToken(hp);
+			BOOL fpp=ImpersonateLoggedOnUser(hp);
+
+			hr=(fpp)?S_OK:GetLastError();
+
+		}
+		~Impersonate_t(){
+			if(!hr) 
+				RevertToSelf();
+		}
+
+	};
+
+
+
+	static	inline HRESULT region_marshal(region_t& region,process_handle_t& process,ISequentialStream* stream
+		,HANDLE hthread=INVALID_HANDLE_VALUE)
+	{
+		HRESULT hr;
+		bool f;
+		DWORD dw;
+		region_t &r=region;
+		if(r.attr==0)
+		{
+			return hr=stream->Write(r.ptr,r.sizeb,&dw);
+		}
+		if(r.attr&IPCM_SOCKET)
+		{
+			//Impersonate_t ip(hthread);
+			socket_data_t wsapi={};
+			SOCKET s=*r.psocket;
+			//if(SOCKET_ERROR==WSADuplicateSocketA(s,&wsapi))	return GetLastError();
+
+			//process_handle_t ppp(process.tid);
+			//HANDLE hppp=ppp;
+			//f=0==WSADuplicateSocketW(s,GetCurrentProcessId(),&wsapi);
+			//hr=WSAGetLastError();
+            //s=WSASocketW(FROM_PROTOCOL_INFO,FROM_PROTOCOL_INFO,FROM_PROTOCOL_INFO,&wsapi, 0, FROM_PROTOCOL_INFO);
+			    
+		    f=0==WSADuplicateSocketW(s,process.tid,&wsapi);
+			hr=WSAGetLastError();
+			//closesocket(s);
+			
+			return hr=stream->Write(&wsapi,sizeof(wsapi),&dw);
+
+		}
+
+		
+		if(r.attr&IPCM_HGLOBAL)
+		{
+
+			CHGlobal_t gl(*r.pcomstub);
+			if(r.attr&IPCM_COM)
+			{
+				CHGlobal_t gl2(HGLOBAL(0));
+				hr=ipc_utils::CoDuplicateCOMStub(gl.handle(),&gl2.m_h,false,MSHCTX_LOCAL,MSHLFLAGS_NORMAL);
+				int siz=gl2.size();
+				if(SUCCEEDED(hr))      hr=stream->Write((char*)gl2,siz,&dw);
+			}
+			else  hr=stream->Write((char*)gl,gl.size(),&dw);
+
+			return hr;
+		}
+
+		if(r.attr&IPCM_COM)
+		{
+
+			CHGlobal_t gl;
+			hr=ipc_utils::CoMarshalInterfaceToHGlobal(*r.ppunknown,&gl.m_h,MSHCTX_LOCAL,MSHLFLAGS_NORMAL);
+			int siz=gl.size();
+			char* p=gl;
+			hr=stream->Write(p,siz,&dw);
+			if(SUCCEEDED(hr)&&(dw<r.sizeb))
+			{ 
+				v_buf<char> tmp(r.sizeb);
+				hr=stream->Write(tmp.get(),r.sizeb-dw,&dw);	
+
+			}
+			return hr;
+		}
+
+		if(r.attr&IPCM_HANDLE)
+		{
+			HANDLE hsrc=*r.phandle;
+			HANDLE hdest[2]={INVALID_HANDLE_VALUE,0};
+			HANDLE hsp=GetCurrentProcess();
+			f=DuplicateHandle(hsp,hsrc,process,hdest,0,0,DUPLICATE_SAME_ACCESS);
+			if(!f) hdest[1]=INVALID_HANDLE_VALUE;
+			hr=WSAGetLastError();
+			return hr=stream->Write(hdest,sizeof(long long),&dw);	   
+		}
+
+	}
+
+
+    inline bool region_detach(int n,region_t* pr)
+	{
+		if((n>=0)&&(pmd)&&(pr))
+		{
+			bool f=(n<pmd->header.region_count);
+			f&=(pmd->regions[n].attr&(~IPCM_ERROR));
+			if(f) *pr=ipc_utils::make_detach(pmd->regions[n]);
+
+			return f;
+
+		}
+		return false;
+	}
+
+
+	
+	static	inline void region_release(region_t& r)
+	{
+		DWORD dw;
+		if((r.attr==0)||(r.attr&IPCM_ERROR)) return;
+
+
+		if(r.attr&IPCM_SOCKET)
+		{
+			if(*r.psocket!=INVALID_SOCKET)
+				closesocket(*r.psocket);
+		}
+
+		else if(r.attr&IPCM_HANDLE)
+		{
+			if(GetHandleInformation(*r.phandle,&dw))
+				CloseHandle(*r.phandle);
+		}
+
+		else if((r.attr&IPCM_HGLOBAL)&&(GlobalFlags(*r.pcomstub)!=GMEM_INVALID_HANDLE))
+		{
+
+			if((r.attr&IPCM_COM))
+			{
+				//com.init();
+				//ipc_utils::smart_ptr_t<IStream> stream;
+				//if(SUCCEEDED(CreateStreamOnHGlobal(*r.pcomstub,0,stream.address())))
+				//	CoReleaseMarshalData( stream);
+				ipc_utils::CoReleaseCOMStub(*r.pcomstub);
+
+			}
+			GlobalFree(*r.pcomstub);
+		}
+
+
+
+	}
+
+
+
+	static	inline void region_unmarshal(region_t& region,char*& buf)
+	{
+         HRESULT hr;
+		region_t &r=region;
+
+		r.ptr=0;
+		long offset=r.sizeb;
+		if(r.attr==0)
+			r.ptr=buf;
+		else if(r.attr&IPCM_SOCKET)
+		{
+			socket_data_t* pwsapi=(socket_data_t*)buf;
+			SOCKET s=WSASocketW(FROM_PROTOCOL_INFO,FROM_PROTOCOL_INFO,FROM_PROTOCOL_INFO,pwsapi, 0, FROM_PROTOCOL_INFO);
+
+			if(s!=INVALID_SOCKET)
+			{ r.ptr=buf; *(r.psocket)=s; r.sizeb=sizeof(SOCKET);}    
+			else r.attr|=IPCM_ERROR;
+
+		}
+		else if(r.attr&(IPCM_HGLOBAL|IPCM_COM))
+		{
+			CHGlobal_t gl(r.sizeb,buf);
+
+			r.attr|=IPCM_HGLOBAL;
+
+			if(gl)
+			{ 
+                if(r.attr&IPCM_COM) 
+				{
+					r.ptr=buf;
+					if(FAILED(hr=ipc_utils::CoDuplicateCOMStub(gl.handle(),r.pcomstub,true,MSHCTX_LOCAL,MSHLFLAGS_TABLESTRONG)))
+						r.attr|=IPCM_ERROR;
+				}
+				else  *r.pcomstub=gl.detach();
+				r.sizeb=sizeof(HGLOBAL);
+			}
+			else r.attr|=IPCM_ERROR;
+		}
+		else if(r.attr&IPCM_HANDLE)
+		{   
+			r.ptr=buf;
+			if(*r.phandle!=INVALID_HANDLE_VALUE) r.sizeb=sizeof(HANDLE);
+			else r.attr|=IPCM_ERROR;
+		}
+
+		buf+=offset;
+	}
+
+
+	void clear()
+	{
+		//		release_ipc_marshal_data(ipc_utils::make_detach(pmd));
+		//marshal_buf.clear();
+		pmd_factory->release_marshal_data(ipc_utils::make_detach(pmd));
+	}
+
+	static void release_ipc_marshal_data(ipc_marshal_data_t* pmd)
+	{
+		if(pmd)
+		{
+
+			for(int n=0;n<pmd->header.region_count;n++)
+				region_release(pmd->regions[n]);
+		}
+	}
+
+
+	inline static HRESULT read_message(ISequentialStream* stream,void* buf,DWORD cb)
+	{
+		HRESULT hr;
+		DWORD cbr;
+		char *p=(char *) buf;
+		while(SUCCEEDED(hr=stream->Read(p,cb,&cbr)))
+		{
+			if(cbr>=cb) break;
+			p+=cbr;
+			cb-=cbr;
+		}
+		return hr;
+	};
+
+	
+
+
+	//HRESULT unmarshal(ISequentialStream* stream,HANDLE fd=INVALID_HANDLE_VALUE,const uuid_t& conn_uuid=s_port_uuid())
+	HRESULT unmarshal(ISequentialStream* stream,const uuid_t& conn_uuid=s_port_uuid())
+	{
+		HRESULT hr;
+		DWORD cb,cbr;
+		bool fpp;
+		ipc_marshal_data_t::header_t header;
+
+		//Impersonate_t imp;
+
+
+		
+
+
+
+
+
+		if(FAILED(hr=read_message(stream,&header,sizeof(header)))) 
+			return hr;
+
+		char* p=(char*)&header; 
+		cbr=sizeof(header);
+
+/*
+if(fd!=INVALID_HANDLE_VALUE)
+{
+		fpp=ImpersonateNamedPipeClient(fd);
+		hr=WSAGetLastError();
+}
+*/	
+		//fpp=ImpersonateClient();
+
+
+
+
+		if(!header.server_pid)
+		{
+			
+            process_handle_t psrc(header.server_pid=GetCurrentProcessId());
+			HANDLE hc=psrc,ho;
+			process_handle_t pdest(header.sender_pid);
+			if(DuplicateHandle(hc,hc,pdest,&ho,0,0,DUPLICATE_SAME_ACCESS))
+			{
+               header.server_handle=ho;
+			}
+                HANDLE htok,ht;
+				//ht=OpenProcessToken(THREAD_ALL_ACCESS,0,GetCurrentThreadId());
+
+			   bool ft=OpenProcessToken(psrc,TOKEN_ALL_ACCESS,&htok);//
+			 //  CloseHandle(ht);
+				   hr=GetLastError();
+			if((ft)&&DuplicateHandle(hc,htok,pdest,&ho,0,0,DUPLICATE_SAME_ACCESS))
+			{
+				header.server_thread_handle=ho;
+			}
+			if(FAILED(hr=stream->Write(&header,sizeof(header),&cb))) 
+				return hr;
+			if(cb!=sizeof(header)) return E_FAIL;
+		}
+
+		clear();
+		//marshal_buf.resize(header.sizeb);
+		//pmd=(ipc_marshal_data_t* )marshal_buf.get();
+		pmd=pmd_factory->allocate(header.sizeb,&release_ipc_marshal_data);
+		pmd->header=header;
+		char* buf=(char*)pmd->regions;
+		int siz=header.sizeb-sizeof(header);
+
+		//if(FAILED(hr=stream->Read(buf,siz,&dw))) 		 return hr;
+		//if(dw!=siz) return E_FAIL;
+
+		if(FAILED(hr=read_message(stream,buf,siz))) 
+			return hr;
+
+//		if(fd!=INVALID_HANDLE_VALUE)		RevertToSelf();
+
+		buf+=sizeof(region_t)*header.region_count;
+
+		for(int n=0;n<header.region_count;n++)
+			region_unmarshal(pmd->regions[n],buf);
+
+		return hr;
+
+
+		//buf(sizeof(marshal_data_impl_t)+sizeof(region_t)*region_count);
+
+	}
+
+
+
+	static	HRESULT marshal(ipc_marshal_data_t* p,ISequentialStream* stream,int pid=0,const uuid_t& conn_uuid=s_port_uuid())
+	{
+		return marshal(p->regions,p->regions+p->header.region_count,stream,pid,conn_uuid);
+	}
+
+
+static	HRESULT marshal(int rcount,region_t* pregions,ISequentialStream* stream,int pid=0,const uuid_t& conn_uuid=s_port_uuid())
+	{
+		return marshal(pregions,pregions+rcount,stream,pid,conn_uuid);
+	}
+
+	template <class  region_iterator>
+static	HRESULT marshal(region_iterator ibegin,region_iterator iend,ISequentialStream* stream,int pid=0,const uuid_t& conn_uuid=s_port_uuid())
+	{
+		//vregions.resize(region_count);
+		//std::copy(pregions,pregions+region_count,vregions.begin());
+
+		if(stream==0) return E_POINTER;
+		HRESULT hr;
+		DWORD dw;
+		int region_count=std::distance(ibegin,iend);
+
+//        int  ddsizh=sizeof(ipc_marshal_data_t),ddf=sizeof(region_t);
+
+		int sizh=sizeof(ipc_marshal_data_t)+sizeof(region_t)*(region_count-1);
+		const int siz_stack=sizeof(ipc_marshal_data_t)+sizeof(region_t)*(REGION_STACK_COUNT-1);
+
+		v_buf<char,utils::alloc::stack_alloc<char,siz_stack> > buf(sizh);
+		ipc_marshal_data_t* pmd=(ipc_marshal_data_t* )buf.get();
+
+
+		pmd->header.port_uuid=s_port_uuid();
+		pmd->header.region_count=region_count;
+		region_iterator iregions=ibegin;
+
+		int siz=sizh,sr;
+		for(int n=0;n<region_count;++n,++iregions)
+		{
+			;
+			pmd->regions[n]=*iregions;
+			pmd->header.regions_attr|=pmd->regions[n].attr;//&(IPCM_HANDLE|IPCM_SOCKET);
+
+
+			if((sr=region_marshal_size(*iregions))<0)
+				 return GetLastError();
+			pmd->regions[n].sizeb=sr;
+			siz+=sr;
+		}
+		pmd->header.sizeb=siz;
+		pmd->header.conn_uuid=conn_uuid;
+		pmd->header.sender_pid=GetCurrentProcessId();
+		pmd->header.server_pid=pid;
+
+
+		hr=stream->Write(&pmd->header,sizeof(pmd->header),&dw);
+		if(FAILED(hr)) 
+			return hr;
+
+
+
+		//if((!pid)&&(pmd->header.regions_attr&(IPCM_HANDLE|IPCM_SOCKET)))	  { }
+		if(!pid)	  {
+
+			ipc_marshal_data_t::header_t header;
+
+			DWORD server_pid;
+			hr=stream->Read(&header,sizeof(header),&dw);
+			if(FAILED(hr)) 
+				return hr;
+			pmd->header.server_pid= header.server_pid;
+			pmd->header.server_handle= header.server_handle;
+			pmd->header.server_thread_handle=header.server_thread_handle;
+		}
+
+		hr=stream->Write(pmd->regions,sizeof(region_t)*region_count,&dw);
+		if(FAILED(hr)) 
+			return hr;
+
+		process_handle_t ph(pmd->header.server_pid);
+		ph.hp=make_detach(pmd->header.server_handle);
+
+		for(int n=0;n<region_count;n++)
+		{
+			hr=region_marshal(pmd->regions[n],ph,stream,pmd->header.server_thread_handle);
+			if(FAILED(hr))  break;
+		}
+
+		if(pmd->header.server_thread_handle)
+			CloseHandle(make_detach(pmd->header.server_thread_handle));
+
+
+		return hr;
+	}
+
+
+	//v_buf<char> marshal_buf;
+	ipc_marshal_data_t* pmd;
+
+	ipc_marshal_data_factory_t* pmd_factory;
+	inner_data_factory_t inner_factory;
+
+};
+

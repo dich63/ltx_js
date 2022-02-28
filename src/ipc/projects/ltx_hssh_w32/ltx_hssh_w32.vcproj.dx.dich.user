@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<VisualStudioUserFile
+	ProjectType="Visual C++"
+	Version="9.00"
+	ShowAllFiles="false"
+	>
+	<Configurations>
+		<Configuration
+			Name="Debug|Win32"
+			>
+			<DebugSettings
+				Command="C:\Windows\SysWOW64\rundll32.exe"
+				WorkingDirectory=""
+				CommandArguments="&quot;V:\ipc\bin_d\Win32\$(ProjectName).dll&quot;,start port=::ltxjs.rpc oppc=0 forever=1 jsdbg=0"
+				Attach="false"
+				DebuggerType="3"
+				Remote="1"
+				RemoteMachine="DX"
+				RemoteCommand=""
+				HttpUrl=""
+				PDBPath=""
+				SQLDebugging=""
+				Environment="hssh.lib=V:\ipc\bin_d\Win32\..\..\tp\hs_socket\hs_socket.dll&#x0A;services.console.mode=-1&#x0A;services.console.alpha=70"
+				EnvironmentMerge="true"
+				DebuggerFlavor="0"
+				MPIRunCommand=""
+				MPIRunArguments=""
+				MPIRunWorkingDirectory=""
+				ApplicationCommand=""
+				ApplicationArguments=""
+				ShimCommand=""
+				MPIAcceptMode=""
+				MPIAcceptFilter=""
+			/>
+		</Configuration>
+		<Configuration
+			Name="Release|Win32"
+			>
+			<DebugSettings
+				Command="C:\Windows\SysWOW64\rundll32.exe"
+				WorkingDirectory=""
+				CommandArguments="&quot;V:\ipc\bin\Win32\$(ProjectName).dll&quot;,start port=::ltxjs.rpc oppc=1 forever=0"
+				Attach="false"
+				DebuggerType="3"
+				Remote="1"
+				RemoteMachine="DX"
+				RemoteCommand=""
+				HttpUrl=""
+				PDBPath=""
+				SQLDebugging=""
+				Environment="hssh.lib=V:\ipc\bin\Win32\..\..\tp\hs_socket\hs_socket.dll&#x0A;services.console.mode=1&#x0A;services.console.alpha=80"
+				EnvironmentMerge="true"
+				DebuggerFlavor="0"
+				MPIRunCommand=""
+				MPIRunArguments=""
+				MPIRunWorkingDirectory=""
+				ApplicationCommand=""
+				ApplicationArguments=""
+				ShimCommand=""
+				MPIAcceptMode=""
+				MPIAcceptFilter=""
+			/>
+		</Configuration>
+	</Configurations>
+</VisualStudioUserFile>

@@ -1,0 +1,73 @@
+; ltx_js.dll
+
+LIBRARY      "ltx_js.dll"
+
+EXPORTS
+	DllCanUnloadNow		PRIVATE
+	DllGetClassObject	PRIVATE
+	DllRegisterServer	PRIVATE
+	DllUnregisterServer	PRIVATE
+	DllInstall		PRIVATE
+	
+	
+	ltx_mm_Lock
+	ltx_mm_Unlock
+	ltx_mm_DataInfo
+    ltx_mm_ByteLength
+    
+    ltx_mm_GetPtr
+    
+    ltx_mm_CommitRegionPtr
+    ltx_mm_DecommitRegionPtr
+    
+    ltx_script
+    ltx_callback
+    ltx_raise_exception
+    ltx_fill_exception
+
+	ltx_external_connector_wait
+	ltx_process_callback
+    ltx_process_callback_loop
+    
+    ltx_create_resource_handle
+    ltx_release
+    ltx_addref
+    ltx_get_context
+    ltx_push_cache
+    ltx_clear_cache
+    ltx_global_ref_count
+
+    
+	ltx_apartment_type
+	apartment_type=ltx_apartment_type
+	
+
+	ltx_get_register_objref
+
+	ltx_register_class
+	ltx_register_classes
+	ltx_get_class
+	ltxGetObject
+	ltxGetObjectEx
+	ltx_stop_all_apartment
+	ltx_callback_list
+	ltx=ltx_callback_list
+	ltx_tss_onexit	
+	bindObject = ltxGetObject
+	bindObjectEx = ltxGetObjectEx
+	bindObjectWithArgs
+	bindObjectWithArgsEx
+	
+	ltx_context_utils
+	get_context_utils
+	
+	runsrvW
+	GetDispId
+	ShowHTML
+	win_console
+	js_console_holderW
+	js_con_srvW=js_console_holderW
+	js_consoleW
+	set_root_evironment_variableW
+	jsW
+	SwitchDesktopW

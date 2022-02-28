@@ -1,0 +1,134 @@
+#pragma once
+
+#include <windows.h>
+
+struct ISharedImage:IUnknown
+{
+	typedef unsigned char byte_t;
+	virtual HRESULT InitA(const char* mapkey,void* pbmp_blank_image=0,int nframes=0,int capacity=-1)=0;
+	virtual HRESULT Init(const wchar_t* mapkey,void* pbmp_blank_image=0,int nframes=0,int capacity=-1)=0;
+	virtual HRESULT PushFrame(void* pbmpimage,const byte_t* pbits=0)=0;
+	virtual HRESULT GetBitmapInfo(BITMAPINFOHEADER* pbmi)=0;
+	virtual HRESULT LockFramePtr(byte_t** ppbits,int mode=0)=0; // 0 -read access, 1- write access
+	virtual HRESULT UnlockFramePtr(byte_t* pbits)=0;
+	virtual HRESULT GetFrame(BITMAPFILEHEADER** pbmpimage,int* pcbimage=0)=0;
+	virtual  ULONG Compression(ULONG mode=0)=0;
+	virtual HRESULT Init2(wchar_t* key, int width=0,int height=0,int fmt=0,int nframes=0,int capacity=-1)=0;
+	virtual HRESULT Init2A(char* key, int width=0,int height=0,int fmt=0,int nframes=0,int capacity=-1)=0;
+
+
+inline	static HRESULT Create(ISharedImage** pp,wchar_t* libpathname=L"nps_detect.dll")
+	{
+		typedef HRESULT (*pCreate_ISharedImage_t)(ISharedImage** ppImage);
+		HRESULT hr;
+		HMODULE hlib=LoadLibraryW(libpathname);
+
+		if(!hlib) return hr=GetLastError();
+
+        pCreate_ISharedImage_t create_proc=(pCreate_ISharedImage_t)GetProcAddress(hlib,"Create_ISharedImage");
+		if(create_proc) hr=create_proc(pp);
+			else return hr=GetLastError();
+	
+		FreeLibrary(hlib);
+		return hr;
+	}
+
+};
+
+
+
+struct   shared_image_helper_t
+{
+    HRESULT hr;
+   ISharedImage*p;
+
+
+   template <class T, class T2>
+   inline T make_detach(T& dst, T2 n)
+   {  
+	   T t=dst;
+	   dst=(T)n;
+	   return t;
+   };
+
+   template <class T>
+   inline T make_detach(T& dst)
+   {  
+	   T t=dst;
+	   dst=T(); 
+	   return t;
+   };
+
+
+   shared_image_helper_t():p(0)
+   {
+	   hr= ISharedImage::Create(&p,L"nps_detect.dll"); 
+   }
+
+
+   shared_image_helper_t(char* key, wchar_t* libpathname=L"nps_detect.dll"):p(0)
+	{
+		hr= ISharedImage::Create(&p,libpathname);
+		if(hr==S_OK) hr=p->Init2A(key);
+	}
+   shared_image_helper_t(wchar_t* key, wchar_t* libpathname=L"nps_detect.dll"):p(0)
+   {
+	   hr= ISharedImage::Create(&p,libpathname);
+	   if(hr==S_OK) hr=p->Init2(key);
+   }
+
+	shared_image_helper_t(const shared_image_helper_t& sp):p(0)
+	{
+		reset(sp.p);
+		hr=sp.hr;
+	}
+
+	shared_image_helper_t& operator =(const shared_image_helper_t& sp)
+	{
+		return reset(sp.p);
+		hr=sp.hr;
+	}
+
+	inline shared_image_helper_t& reset(ISharedImage* np=0,bool faddref=true)
+	{
+		if(np!=p)
+		{
+			ISharedImage* t=make_detach(p,np);
+			if(p&&faddref) p->AddRef();
+			if(t)
+				t->Release();
+		}
+		return *this;
+	}
+	inline  ISharedImage* operator->()
+	{
+		return p;
+	}
+	inline   operator ISharedImage*()
+	{
+		return p;
+	}
+
+	ISharedImage** address()
+	{
+		reset();
+		return &p;
+	}
+	
+
+	long refcount()
+	{
+		if(p)
+		{
+			p->AddRef();
+			return p->Release();
+		}
+		else return 0;
+	}
+
+	operator bool(){ return hr==0;}
+
+	
+	
+
+};

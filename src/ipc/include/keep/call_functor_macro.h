@@ -1,0 +1,171 @@
+#pragma once
+//call_functor_macro.h
+
+
+
+
+
+
+#define _MCALL_DUMMY(FUNCTION,INNER_PROC,V,VH) ;
+
+#define MACRO_CALL_n(n,FUNCTION,INNER_PROC,V,VH) FUNCTION ) _MCALL_##n(FUNCTION,INNER_PROC,V,VH);
+
+//#define _MCALL_1_n(n,FUNCTION,INNER_PROC,V,VH)  _MCALL_1_n(M_##n,FUNCTION,INNER_PROC,V,VH); \
+//MCALL_n(n,FUNCTION,INNER_PROC,V,VH)
+#define  MACRO_CALL_s_n(n,FUNCTION,INNER_PROC,V,VH) _MCALL_s_##n(FUNCTION,INNER_PROC,V,VH)
+
+#define _MCALL_s_0(FUNCTION,INNER_PROC,V,VH) _MCALL_0(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_1(FUNCTION,INNER_PROC,V,VH) \
+	 	_MCALL_s_0(FUNCTION,INNER_PROC,V,VH); \
+		_MCALL_1(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_2(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_1(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_2(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_3(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_2(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_3(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_4(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_3(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_4(FUNCTION,INNER_PROC,V,VH);
+
+
+#define _MCALL_s_5(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_4(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_5(FUNCTION,INNER_PROC,V,VH);
+
+
+#define _MCALL_s_6(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_5(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_6(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_7(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_6(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_7(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_8(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_7(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_8(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_9(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_8(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_9(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_10(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_9(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_10(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_11(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_10(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_11(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_12(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_11(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_12(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_13(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_12(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_13(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_14(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_13(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_14(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_15(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_14(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_15(FUNCTION,INNER_PROC,V,VH);
+
+#define _MCALL_s_16(FUNCTION,INNER_PROC,V,VH) \
+	_MCALL_s_15(FUNCTION,INNER_PROC,V,VH); \
+	_MCALL_16(FUNCTION,INNER_PROC,V,VH);
+
+
+// =============================================
+
+#define _MCALL_0(FUNCTION,INNER_PROC,V,VH) FUNCTION (){\
+	VH ___vv[1];\
+	return  INNER_PROC(0,___vv); \
+};
+
+
+#define _MCALL_1(FUNCTION,INNER_PROC,V,VH) FUNCTION ( V v0){\
+	VH vv[1+1]={v0};\
+	return  INNER_PROC(1,vv); \
+}
+
+#define _MCALL_2(FUNCTION,INNER_PROC,V,VH) FUNCTION ( V v0,V v1){\
+	VH vv[2+1]={v1,v0};\
+	return  INNER_PROC(2,vv); \
+}
+#define _MCALL_3(FUNCTION,INNER_PROC,V,VH) FUNCTION ( V v0,V v1,V v2){\
+	VH vv[3+1]={v2,v1,v0};\
+	return  INNER_PROC(3,vv); \
+}
+
+#define _MCALL_4(FUNCTION,INNER_PROC,V,VH) FUNCTION (  V v0,V v1,V v2,V v3){\
+	VH vv[4+1]={v3,v2,v1,v0};\
+	return  INNER_PROC(4,vv); \
+}
+
+#define _MCALL_5(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4){\
+	VH vv[5+1]={v4,v3,v2,v1,v0};\
+	return  INNER_PROC(5,vv); \
+}
+
+#define _MCALL_6(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5){\
+	VH vv[6+1]={v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(6,vv); \
+}
+
+#define _MCALL_7(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6){\
+	VH vv[7+1]={v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(7,vv); \
+}
+
+#define _MCALL_8(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7){\
+	VH vv[8+1]={v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(8,vv); \
+}
+
+#define _MCALL_9(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8){\
+	VH vv[9+1]={v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(9,vv); \
+}
+
+#define _MCALL_10(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9){\
+	VH vv[10+1]={v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(10,vv); \
+}
+
+#define _MCALL_11(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10){\
+	VH vv[11+1]={v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(11,vv); \
+}
+
+#define _MCALL_12(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10,V v11){\
+	VH vv[12+1]={v11,v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(12,vv); \
+}
+
+#define _MCALL_13(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10,V v11,V v12){\
+	VH vv[13+1]={v12,v11,v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(13,vv); \
+}
+
+#define _MCALL_14(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10,V v11,V v12,V v13){\
+	VH vv[14+1]={v13,v12,v11,v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(14,vv); \
+}
+
+#define _MCALL_15(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10,V v11,V v12,V v13,V v14){\
+	VH vv[15+1]={v14,v13,v12,v11,v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(15,vv); \
+}
+
+#define _MCALL_16(FUNCTION,INNER_PROC,V,VH) FUNCTION  ( V v0,V v1,V v2,V v3,V v4,V v5,V v6,V v7,V v8,V v9,V v10,V v11,V v12,V v13,V v14,V v15){\
+	VH vv[16+1]={v15,v14,v13,v12,v11,v10,v9,v8,v7,v6,v5,v4,v3,v2,v1,v0};\
+	return  INNER_PROC(16,vv); \
+}

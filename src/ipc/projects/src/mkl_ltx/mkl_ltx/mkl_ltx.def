@@ -1,0 +1,32 @@
+; mkl_ltx.dll
+
+LIBRARY      "mkl_ltx.dll"
+
+EXPORTS
+scalar_prod
+inner_prod=scalar_prod
+matrix_CSR_create
+matrix_COO2CSR_create=matrix_CSR_create
+matrix_DIA2CSR_create
+matrix_COO_container_create
+marshalQItest
+linsolver
+dilation
+matrix_add
+complex_pr
+create_complex
+mv_mul
+v_add
+v_add_real
+cmp_pattern
+v_clear
+v_copy
+lipa_real_solver
+triangulation_to_coo_matrix_dupl
+mesh_data_to_matrix
+mesh_utils
+mesh2D_in_rect_index
+tri2D_in_rect_index=mesh2D_in_rect_index
+vxs2D_in_rect_index
+vxs2D_prjtransform_in_rect_index
+set_key_value

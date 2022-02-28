@@ -1,0 +1,1 @@
+COMMON_CPP_UTILS=V:\msc_bcb_COMUtils

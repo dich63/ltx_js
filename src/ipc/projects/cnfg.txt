@@ -1,0 +1,11 @@
+$(SolutionDir)\..\bin_d\$(PlatformName)
+$(SolutionDir)\..\tmp\$(ProjectName)\$(PlatformName)\$(ConfigurationName)
+
+
+$(SolutionDir)lib\$(PlatformName)\$(ConfigurationName)\$(TargetName).lib
+
+
+
+c:\windows\system32\rundll32.exe
+
+"D:\tmp\2014_10_07_14-47-29\ipc\bin_d\.install\\..\x64\ltx_js.dll",js "T:\.felix\aa.jlx"

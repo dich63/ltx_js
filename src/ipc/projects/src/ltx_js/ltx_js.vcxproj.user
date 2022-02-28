@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LocalDebuggerCommand>C:\Windows\system32\rundll32.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>$(OutDir)\$(ProjectName).dll,js t:/.00/t.js</LocalDebuggerCommandArguments>
+    <LocalDebuggerEnvironment>services.console.mode=1
+__ltx_cmd__=#
+JScript_CLSID={16D51579-A30B-4C8B-A276-0FF4DC41E755}</LocalDebuggerEnvironment>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LocalDebuggerCommand>C:\Windows\sysWOW64\rundll32.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>$(OutDir)\$(ProjectName).dll,js t:\11\j.js 11 22</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,73 @@
+#pragma once 
+//trimatrix
+
+#include "utils/utils.h"
+#include "utils/complex-utils.h"
+#include <memory>
+
+namespace trimatrix {
+
+
+
+	
+
+
+	template <template <class > class _COMPLEX, class _F, int M>
+	struct F_t {
+		typedef _COMPLEX<_F> complex_t;
+		complex_t* v[M];		
+	};
+
+
+
+
+template <template <class > class _COMPLEX, class _F,  int M = 1, class _MEMPOOL= utils::mem_pool_t<> >
+struct  trimatrix_base_t {
+	/*
+	[ a0, c0,  0,  0,  0,  0,  0, b0]
+	[ b1, a1, c1,  0,  0,  0,  0,  0]
+	[  0, b2, a2, c2,  0,  0,  0,  0]
+	         ................
+	[  0,  0,  0,  0, b5, a5, c5,  0]
+	[  0,  0,  0,  0,  0, b6, a6, c6]
+	[ c7,  0,  0,  0,  0,  0, b7, a7]
+	*/
+
+	typedef _MEMPOOL pool_t;
+	typedef _COMPLEX<_F> complex_t;
+	typedef _F real_t;
+
+	trimatrix_base_t():N(0),a(nullptr), b(nullptr), c(nullptr) {
+		repeat_M([&](auto m) { yy[m] = nullptr;  });
+	}
+
+	trimatrix_base_t(size_t _N) :N(_N) {
+
+		pool.alloc(N,&a);
+		pool.alloc(N, &b);
+		pool.alloc(N, &c);
+
+		repeat_M([&](auto m) {
+
+			pool.alloc(N, yy + m);
+
+			});
+
+	}
+	
+	trimatrix_base_t(size_t _N, complex_t* _a, complex_t* _b, complex_t* _c, complex_t** _yy) :N(_N),a(_a), b(_b), c(_c) {
+
+		repeat_M([&](auto m) { yy[m] = _yy[m];  });
+	}
+	
+
+	size_t N;
+	complex_t* a, * b, * c;	
+	complex_t* yy[M];
+	utils::loop_op_t<M> repeat_M;
+	pool_t pool;
+};
+
+
+
+};

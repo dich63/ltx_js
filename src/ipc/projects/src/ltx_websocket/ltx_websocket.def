@@ -1,0 +1,15 @@
+; ltx_websocket.dll
+
+LIBRARY      "ltx_websocket.dll"
+
+EXPORTS
+tcp_connect
+ws_connect
+ws_send
+ws_recv
+ws_sendrecv
+socket_error
+set_socket_close_event
+add_socket_close_event_handler
+terminate_process_on_socket_close
+

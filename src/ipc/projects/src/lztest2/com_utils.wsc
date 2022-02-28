@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+
+<package>
+<component id="js">
+
+
+<registration
+	description="com_utils_helper"
+	progid="com_utils_helper"
+	version="1.00"
+
+>
+</registration>
+
+<public>
+
+	
+	
+	<method name="bind" internalName="bind" dispid="0">
+	</method>
+	<method name="external" internalName="external" dispid="1">
+	</method>
+
+  
+
+</public>
+
+<implements type="Behavior" id="Behavior"/>
+
+
+<script language="JScript">
+<![CDATA[
+self=this;
+//LTX_MONIKER_EXTERNAL_OBJECT=DICH_EXTERNAL_OBJECT_REF_MONIKER
+function getenv(key) {   return  (new ActiveXObject('WScript.Shell')).Environment("Process")(key);}
+
+function bind(parse_str)
+{
+  return GetObject(parse_str);
+}
+
+function external()
+{
+  var s=getenv('LTX_MONIKER_EXTERNAL_OBJECT');
+  var objref=getenv(s);
+  return GetObject(objref);
+}
+
+]]>
+</script>
+
+</component>
+
+</package>

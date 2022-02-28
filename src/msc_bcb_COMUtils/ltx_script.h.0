@@ -1,0 +1,471 @@
+#pragma once
+
+#include "windows.h"
+//
+#include "os_utils.h"
+#include <comdef.h>
+#include <atlbase.h>
+//#include <atlcom.h>
+//#include <atldef.h>
+
+//#include "ipc.h"
+#include <vector>
+#include <algorithm>
+
+
+#define JS_LTX_DBG ":dbg:1"
+
+#define JS_LTX_STA  "dich-ltx:sta:script"
+#define JS_LTX_STD      "dich-ltx:both:script"
+#define JS_LTX_SRV  "dich-ltx-srv:both:script"
+
+#define JS_LTX_STA_DBG JS_LTX_STA JS_LTX_DBG
+#define JS_LTX_STD_DBG JS_LTX_STD JS_LTX_DBG
+#define JS_LTX_SRV_DBG JS_LTX_SRV JS_LTX_DBG
+
+#define CHECK_FAIL_(hr,a) if(FAILED(hr=(a))) \
+	return hr;
+#define CHECK_FAIL_hr(a)  CHECK_FAIL_(hr,a)
+
+#define COMINIT_F LifeTimeX_Scriptor_base::COMInit ccccc2222(COINIT_MULTITHREADED);
+#define COMINIT_A LifeTimeX_Scriptor_base::COMInit ccccc222(COINIT_APARTMENTTHREADED);
+
+
+/*
+inline void* _set_dll_proc(HMODULE h,void** fp,char* name)
+{
+	return (h)?(*fp=(void*)GetProcAddress(h,name)):NULL;
+}
+
+#define SET_PROC_ADDRESS_prfx(h,a,prfx) _set_dll_proc(h,(void**)&prfx##a,#a)
+#define SET_PROC_ADDRESS(h,a) _set_dll_proc(h,(void**)&a,#a)
+*/
+
+struct LifeTimeX_Scriptor_base
+{
+
+	class COMInit
+	{
+	public:
+		HRESULT m_hr;
+		COMInit(DWORD dw= COINIT_MULTITHREADED /*COINIT_APARTMENTTHREADED*/ )
+		{	m_hr=CoInitializeEx(NULL,dw);}
+		~COMInit()
+		{	if(SUCCEEDED(m_hr)) CoUninitialize();}
+		inline operator HRESULT() { return m_hr;}
+	};
+
+
+	template<typename N>
+	static	inline int IntPtr(N pr)
+	{
+		union
+		{
+			N t;
+			int k;
+		} u;
+		u.t=pr;
+		return u.k;
+	};
+	template<typename N>
+	static	inline int IntPtrEncode(N pr)
+	{
+		void* p=(void*) IntPtr(pr);
+		return (int)EncodePointer(p);
+	}
+
+
+	class ExcepInfo :
+		public EXCEPINFO
+	{
+
+	public:
+		ExcepInfo()
+		{
+			memset( this, 0, sizeof( *this ) );
+
+		}
+#define __BSTR_cpy(a) if(a) bstr##a=::SysAllocString(a);
+
+		ExcepInfo(BSTR Description,BSTR Source=0,BSTR HelpFile=0)
+		{
+			memset( this, 0, sizeof( *this ) );
+			__BSTR_cpy(Description);
+			__BSTR_cpy(Source);
+			__BSTR_cpy(HelpFile);
+
+		}
+
+		~ExcepInfo()
+		{
+			Clear();
+		}
+
+		void Clear()
+		{
+			::SysFreeString(bstrSource);
+			::SysFreeString(bstrDescription);
+			::SysFreeString(bstrHelpFile);
+
+			memset(this, 0, sizeof(*this));
+		}
+	};
+
+	struct ErrorHelper
+	{
+		EXCEPINFO& m_ei;
+		GUID m_iid;
+		ErrorHelper(EXCEPINFO& ei,GUID iid=GUID_NULL ):m_ei(ei),m_iid(iid){};
+
+		template <class I>
+		inline HRESULT	get_error_info(I** ppIntf)
+		{	HRESULT hr;
+		if(!ppIntf) return E_POINTER;
+		//CComPtr<IErrorInfo> ei;
+		IErrorInfo* ei=0;
+		CHECK_FAIL_hr(get_error_info(&ei));
+		hr=ei->QueryInterface(__uuidof(I),(void**)ppIntf);
+		if(ei) ei->Release();
+		return hr;
+		}
+
+		inline HRESULT	get_error_info(IErrorInfo** ppIntf,bool fandset=true)
+		{ 
+			HRESULT hr;
+
+			if(!ppIntf) return E_POINTER;
+
+			//CComPtr<ICreateErrorInfo> cei;
+			ICreateErrorInfo* cei;
+			CHECK_FAIL_hr(CreateErrorInfo(&cei));
+
+			(cei->SetGUID(m_iid));
+			(cei->SetSource(m_ei.bstrSource));
+			(cei->SetDescription(m_ei.bstrDescription));
+			(cei->SetHelpFile(m_ei.bstrHelpFile));
+			(cei->SetHelpContext(m_ei.dwHelpContext));
+			hr=cei->QueryInterface(__uuidof(IErrorInfo),(void**)ppIntf);
+			if((fandset)&&(SUCCEEDED(hr))) SetErrorInfo(0,*ppIntf);
+			if(cei) cei->Release();
+			return hr;
+		}
+
+
+
+	};
+
+	inline bool  IsComPresents(bool fchekonly=1,DWORD appart=COINIT_MULTITHREADED)
+	{
+		return 1;
+		HRESULT hr = CoInitializeEx(NULL,appart);
+		if(fchekonly||(hr)) CoUninitialize();
+		return hr;
+	}
+
+
+	static	inline VARIANT NOP()
+	{
+		VARIANT v={VT_ERROR};
+		v.scode=DISP_E_PARAMNOTFOUND;
+		return v;
+	}
+	inline bool is_optional(const VARIANT& v)
+	{
+		return (v.vt==VT_ERROR)&&(v.scode==DISP_E_PARAMNOTFOUND);
+	}
+
+
+	//HRESULT m_hr;
+	//IDispatch* m_pscript;
+	CComGITPtr<IDispatch> m_script;
+
+
+
+	/*
+	inline com_string moniker_string(com_string appart,int dbg_mode=0)
+	{
+	char buf[256];
+
+	}
+	*/
+
+	/*
+	LifeTimeX_Scriptor_base():m_hr(E_POINTER)
+	{
+	}
+	~LifeTimeX_Scriptor_base()
+	{
+	//if((m_pscript)&&IsComPresents())
+	//	m_pscript->Release();
+	}
+	*/
+
+
+	inline DWORD Detach() 
+	{
+		return m_script.Detach();
+	}
+
+	inline void Attach(DWORD c) 
+	{
+
+		m_script.Attach(c);
+	}
+
+	//__declspec(property(get=get_cookie, put=set_cookie)) DWORD cookie;
+
+
+	inline HRESULT invoke(BSTR txt,int argc,VARIANT *pargv,VARIANT *pret,EXCEPINFO* pex=NULL,bool finvert=true)
+	{
+		HRESULT hr;
+		CComPtr<IDispatch>  pscript;
+		CHECK_FAIL_hr(m_script.CopyTo(&pscript)); 
+		//if(!m_pscript) return m_hr=E_POINTER;
+		UINT flags=DISPATCH_METHOD|DISPATCH_PROPERTYGET;
+		std::vector<VARIANT> vlist;
+
+		vlist.resize(argc+1);
+
+		if(finvert) std::reverse_copy(pargv,pargv+argc,vlist.begin());
+		else std::copy(pargv,pargv+argc,vlist.begin());
+		{
+			VARIANT& vf=vlist[argc];
+			vf.vt=VT_BSTR;
+			vf.bstrVal=txt;
+		}
+
+		DISPPARAMS dp = { &(vlist[0]),NULL,argc+1,0};
+		hr=pscript->Invoke(DISPID_VALUE,IID_NULL, LOCALE_USER_DEFAULT,flags, &dp, pret,pex, NULL);
+		return hr;
+	}
+};
+
+
+
+template <class com_variant=variant_t,class com_string=bstr_t,class com_exception=_com_error>
+struct LifeTimeX_Scriptor_T:LifeTimeX_Scriptor_base
+{
+
+protected:
+
+
+public:
+	class arguments
+	{
+	protected:
+
+
+		struct __INVOKEPARAMS 
+		{
+			DISPPARAMS* pdispparams;
+			WORD wFlags;
+			HRESULT hr;
+			HRESULT (__stdcall *ltx_TlsArgs)(IDispatch** );
+		} ;
+
+		typedef  __INVOKEPARAMS INVOKEPARAMS;
+
+
+         
+
+		inline	   static DWORD _tls_index()
+		{
+		    HMODULE hm;	
+			LifeTimeX_Scriptor_T<com_variant,com_string,com_exception> ltxscr(JS_LTX_STD);
+			::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN,"LifeTimeX.dll",&hm);// immortal DLL
+			return (int)ltxscr(L"ltx_bind('proc_wrap').TlsIndex");
+		}
+
+	public:
+
+inline		static DWORD tls_index()
+		{
+			static DWORD s_index=_tls_index();
+			return s_index;
+		}
+
+inline	operator com_variant()
+         {
+           HRESULT hr=E_POINTER;
+           INVOKEPARAMS*	ip=(INVOKEPARAMS*)::TlsGetValue(tls_index());
+		   com_variant r((IDispatch*)0);
+		   if(ip)  hr=ip->ltx_TlsArgs(&r.pdispVal);
+		   if(FAILED(hr)) raise_error(hr);
+		   return r;
+         }   
+
+
+inline		static  void raise_error(HRESULT hr,com_string desc=com_string(),com_string source=com_string())
+		{
+			if(hr==0) hr=DISP_E_EXCEPTION;
+			INVOKEPARAMS*	ip=(INVOKEPARAMS*)::TlsGetValue(tls_index());
+			if(ip) ip->hr=hr;
+			LifeTimeX_Scriptor_base::ExcepInfo ei(desc,source);
+			LifeTimeX_Scriptor_base::ErrorHelper eh(ei);
+			IErrorInfo* perrinfo=0;
+			eh.get_error_info(&perrinfo);
+			throw  com_exception(hr,perrinfo);
+		}
+
+inline		static		 int count()
+		{
+			INVOKEPARAMS*	ip=(INVOKEPARAMS*)::TlsGetValue(tls_index());
+			if(ip)
+				return ip->pdispparams->cArgs;
+			else return 0;
+		}
+
+
+
+
+inline	static	   int length()
+		{
+			return count();
+		}
+
+		inline VARIANT nop()
+		{
+          return LifeTimeX_Scriptor_base::NOP();
+		}
+		inline com_variant& operator [](int n)
+		{
+			static com_variant verr=nop();  
+			INVOKEPARAMS*	ip=(INVOKEPARAMS*)::TlsGetValue(tls_index());
+			if(ip)
+			{
+				int nn=ip->pdispparams->cArgs;
+				if((n>=0)&&(n<nn))
+					return  *( (com_variant*)  (ip->pdispparams->rgvarg+(nn-1-n)));
+			}
+			return verr;
+
+		}
+	};
+
+
+inline	void check_error(HRESULT hr,EXCEPINFO* pei=0)
+	{
+		if(FAILED(hr))
+		{
+			IErrorInfo *perrinfo=0;
+			if(pei) ErrorHelper(*pei).get_error_info(&perrinfo);
+			//SetErrorInfo(0,perrinfo);
+			throw  com_exception(hr,perrinfo);
+		}
+	}
+
+	//HRESULT hr;
+
+
+
+	/*
+	inline com_string moniker_string(com_string appart,int dbg_mode=0)
+	{
+	char buf[256];
+
+	}
+	*/
+	LifeTimeX_Scriptor_T(int c)
+	{
+		m_script.Attach(c);
+	}
+
+
+	LifeTimeX_Scriptor_T(com_string moniker_string=com_string(JS_LTX_STD))
+	{
+		if(moniker_string.length()>0)       
+		{
+			CComPtr<IDispatch>  script;
+			check_error(::CoGetObject(moniker_string,0,__uuidof(IDispatch),(void**)&script));
+			m_script=script;
+		}
+	}
+
+	inline operator HRESULT(){return hr;};
+
+	inline VARIANT& exec_except(BSTR txt,int argc=0,VARIANT* pargv=0,VARIANT* pr=&VARIANT())
+	{
+		ExcepInfo ei;
+		check_error(invoke(txt,argc,pargv,pr,&ei),&ei);
+		return *pr;
+	};
+
+	template<typename N >
+	inline com_variant wrap_callback( N proc,void* context,com_string name=com_string(),int calltype=3)
+	{
+
+		LifeTimeX_Scriptor_T<com_variant,com_string,com_exception> ltxscr(JS_LTX_STD);
+		com_variant wrap_o=ltxscr("ltx_bind('proc_wrap')($0,$1,$2)",IntPtr(proc),IntPtr(context),calltype);
+		if(name.length()>0) 
+			(*this)(name+com_string("=$0"),wrap_o);
+			return wrap_o;
+
+	}
+	template<typename N >
+	inline com_variant wrap_method( N tp,void* pthis,com_string name=com_string())
+	{
+		return wrap_callback(tp,pthis,name,int(0));
+	}
+
+	typedef void (__stdcall *OLE_STD_PASCAL_ARRAY_PROC_EX)(void* pcontext,const com_variant* pargs,long narglast,com_variant* Result,HRESULT *hr);
+
+	inline com_variant wrap_raw_stdcall( OLE_STD_PASCAL_ARRAY_PROC_EX tp,void* pctx,com_string name=com_string())
+	{
+		return wrap_callback(tp,pthis,name,int(4));
+	}
+	inline com_variant exec_n(com_string txt,int argc,com_variant *pargv)
+	{ 
+		return   exec_except(txt,argc,pargv);
+
+	}
+
+
+	inline com_variant operator()(com_string txt)
+	{
+		return exec_except(txt);
+	}
+	inline com_variant operator()(com_string txt,com_variant vb)
+	{
+		return exec_except(txt,1,&vb);
+	}
+	inline com_variant operator()(com_string txt,com_variant vb,com_variant ve)
+	{
+		//return exec_except(txt,std::distance(&vb,&ve+1),&vb);
+		return exec_except(txt,2,&vb);
+	}
+	inline com_variant operator()(com_string txt,com_variant vb,com_variant v1,com_variant ve)
+	{
+		return exec_except(txt,3,&vb);
+	}
+	inline com_variant operator()(com_string txt,com_variant vb,com_variant v1,com_variant v2,com_variant ve)
+	{
+		return exec_except(txt,4,&vb);
+	}
+	inline com_variant operator()(com_string txt,com_variant vb,com_variant v1,com_variant v2,com_variant v3,com_variant ve)
+	{
+		return exec_except(txt,5,&vb);
+	}
+
+
+};
+
+
+
+typedef _com_error com_exception;
+typedef  LifeTimeX_Scriptor_T<variant_t,bstr_t,com_exception> ltx_script;
+#define ltx_arguments ltx_script::arguments() 
+
+#define _pn(a) #a
+
+
+#define BEGIN_SCRIPT(...) (ltx_script(__VA_ARGS__))(_pn 
+#define    END_SCRIPT(...) ,__VA_ARGS__);
+
+#define JS_BEGIN BEGIN_SCRIPT
+#define JS_BEGIN_STD JS_BEGIN(JS_LTX_STD)
+#define JS_END_ARGS END_SCRIPT
+#define JS_END );
+
+#define js_begin JS_BEGIN
+#define js_end JS_END
+#define js_end_args JS_END_ARGS 
